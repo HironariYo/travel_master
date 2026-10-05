@@ -266,10 +266,16 @@ test('OpenStreetMap: 有料道路・高速道路を使わない条件を Valhall
   assert.equal(r.legs[0].distanceMeters, 108100);
   assert.equal(r.legs[0].polylinePrecision, 6);
   assert.deepEqual(r.legs[0].unavoidable, ['toll'], '有料道路は避けられなかった。高速道路は避けられた');
-  assert.deepEqual(r.options, { avoidTolls: true, avoidHighways: true });
+  assert.deepEqual(r.legs[0].options, { avoidTolls: true, avoidHighways: true }, '全体の指定は各区間に引き継ぐ');
 
   // 条件なしなら何も渡さず、警告も出さない
-  const plain = await buildSchedule({ ...plan, avoidTolls: false, avoidHighways: false }, osmRouter(fakeFetch));
+  const plainPlan = normalizePlan({
+    stops: [
+      { place: 'A', lat: 35.68, lng: 139.76, departAt: new Date(T0).toISOString() },
+      { place: 'B', lat: 35.1, lng: 139.08 },
+    ],
+  });
+  const plain = await buildSchedule(plainPlan, osmRouter(fakeFetch));
   assert.deepEqual(sent.body.costing_options, { auto: {} });
   assert.deepEqual(plain.legs[0].unavoidable, []);
 });
@@ -280,4 +286,43 @@ test('OpenStreetMap: 道が見つからないときは入力の問題として�
     osmRouter(fakeFetch)({ place: '島', location: { lat: 1, lng: 1 } }, { place: '本土', location: { lat: 2, lng: 2 } }),
     (err) => err instanceof InputError && /見つかりません/.test(err.message),
   );
+});
+
+test('有料道路・高速道路の条件を区間ごとに指定できる', async () => {
+  const plan = normalizePlan({
+    stops: [
+      { place: 'A', departAt: new Date(T0).toISOString(), avoidTolls: true }, // 出発地の指定は使わない
+      { place: 'B', avoidTolls: true },
+      { place: 'C' },
+      { place: 'D', avoidHighways: true },
+    ],
+    avoidHighways: true, // 地点に指定がない区間だけに効く
+  });
+  assert.equal(plan.stops[0].avoidTolls, false);
+  const seen = [];
+  const r = await buildSchedule(plan, async (from, to, dep, options) => {
+    seen.push(`${from.place}→${to.place} ${JSON.stringify(options)}`);
+    return { durationSeconds: 60, distanceMeters: 1, polyline: '', start: null, end: null };
+  });
+  assert.deepEqual(seen, [
+    'A→B {"avoidTolls":true,"avoidHighways":true}',
+    'B→C {"avoidTolls":false,"avoidHighways":true}',
+    'C→D {"avoidTolls":false,"avoidHighways":true}',
+  ]);
+
+  const explicit = normalizePlan({
+    stops: [
+      { place: 'A', departAt: new Date(T0).toISOString() },
+      { place: 'B', avoidTolls: false, avoidHighways: false },
+      { place: 'C', avoidTolls: true, avoidHighways: false },
+    ],
+    avoidTolls: true,
+    avoidHighways: true,
+  });
+  assert.deepEqual(
+    explicit.stops.slice(1).map((s) => [s.avoidTolls, s.avoidHighways]),
+    [[false, false], [true, false]],
+    '地点の指定（false も）が全体の指定より優先',
+  );
+  assert.deepEqual(r.legs.map((l) => l.options.avoidTolls), [true, false, false]);
 });

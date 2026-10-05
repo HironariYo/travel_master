@@ -25,9 +25,10 @@
         </div>
 
         <fieldset class="options">
-          <legend>ルートの条件</legend>
+          <legend>ルートの条件（全区間まとめて）</legend>
           <label><input type="checkbox" name="avoidTolls"> 有料道路を使わない</label>
           <label><input type="checkbox" name="avoidHighways"> 高速道路を使わない</label>
+          <p class="options-note">区間ごとに変えるときは、各目的地の「ここまでの道」で選んでください。</p>
         </fieldset>
 
         <p class="hint">
@@ -87,6 +88,11 @@
           <span class="depart-label">出発時刻</span>
           <input type="datetime-local" name="departAt">
         </label>
+      </div>
+      <div class="leg-options" role="group">
+        <span class="leg-options-label">ここまでの道</span>
+        <label><input type="checkbox" name="legAvoidTolls"> 有料道路を使わない</label>
+        <label><input type="checkbox" name="legAvoidHighways"> 高速道路を使わない</label>
       </div>
     </li>
   </template>

@@ -37,10 +37,48 @@ function addStop(values = {}) {
   setSelection(node, values.placeId || Number.isFinite(values.lat) ? values : null);
   $('[name=stayMinutes]', node).value = values.stayMinutes ?? 60;
   $('[name=departAt]', node).value = values.departAt ?? '';
+  // 区間の条件。指定がなければ「全区間まとめて」の状態に合わせる
+  $('[name=legAvoidTolls]', node).checked = values.avoidTolls ?? masterValue('avoidTolls');
+  $('[name=legAvoidHighways]', node).checked = values.avoidHighways ?? masterValue('avoidHighways');
   stopsEl.append(node);
   relabel();
   return node;
 }
+
+// ---------- 有料道路・高速道路の条件 ----------
+// 各目的地の「ここまでの道」が本体。上の「全区間まとめて」は全部をそろえるためのスイッチで、
+// 区間ごとにばらばらのときは「一部」（indeterminate）を表示する
+
+const LEG_FIELDS = { avoidTolls: 'legAvoidTolls', avoidHighways: 'legAvoidHighways' };
+
+function legBoxes(key) {
+  return [...stopsEl.children].slice(1).map((li) => $(`[name=${LEG_FIELDS[key]}]`, li));
+}
+
+function masterValue(key) {
+  const box = form[key];
+  return box.checked && !box.indeterminate;
+}
+
+function syncMasters() {
+  for (const key of Object.keys(LEG_FIELDS)) {
+    const values = legBoxes(key).map((b) => b.checked);
+    const all = values.length > 0 && values.every(Boolean);
+    const some = values.some(Boolean);
+    form[key].checked = all;
+    form[key].indeterminate = some && !all;
+  }
+}
+
+for (const key of Object.keys(LEG_FIELDS)) {
+  form[key].addEventListener('change', () => {
+    for (const box of legBoxes(key)) box.checked = form[key].checked;
+    form[key].indeterminate = false;
+  });
+}
+stopsEl.addEventListener('change', (e) => {
+  if (e.target.name === 'legAvoidTolls' || e.target.name === 'legAvoidHighways') syncMasters();
+});
 
 function relabel() {
   [...stopsEl.children].forEach((li, i) => {
@@ -54,6 +92,7 @@ function relabel() {
     $('[data-action=down]', li).disabled = i === stopsEl.children.length - 1;
   });
   $('#add-stop').disabled = stopsEl.children.length >= maxStops;
+  syncMasters();
 }
 
 stopsEl.addEventListener('click', (e) => {
@@ -75,10 +114,10 @@ $('#add-stop').addEventListener('click', () => {
 
 $('#reset').addEventListener('click', () => {
   stopsEl.replaceChildren();
-  addStop({ departAt: defaultStart() });
-  addStop();
   form.avoidTolls.checked = false;
   form.avoidHighways.checked = false;
+  addStop({ departAt: defaultStart() });
+  addStop();
   clearResults();
   save();
 });
@@ -96,18 +135,18 @@ function readForm() {
       ...selectionOf(li),
       stayMinutes: Number($('[name=stayMinutes]', li).value || 0),
       departAt: $('[name=departAt]', li).value,
+      avoidTolls: $('[name=legAvoidTolls]', li).checked,
+      avoidHighways: $('[name=legAvoidHighways]', li).checked,
     })),
-    avoidTolls: form.avoidTolls.checked,
-    avoidHighways: form.avoidHighways.checked,
   };
 }
 
 function fillForm(plan) {
   stopsEl.replaceChildren();
-  plan.stops.forEach((s) => addStop(s));
+  // 以前の形式（条件が全体に 1 つだけ）で保存・共有された計画は、その条件を全区間に当てはめる
+  const fallback = { avoidTolls: Boolean(plan.avoidTolls), avoidHighways: Boolean(plan.avoidHighways) };
+  plan.stops.forEach((s) => addStop({ ...fallback, ...s }));
   while (stopsEl.children.length < 2) addStop();
-  form.avoidTolls.checked = Boolean(plan.avoidTolls);
-  form.avoidHighways.checked = Boolean(plan.avoidHighways);
 }
 
 // 入力内容はこのブラウザにだけ保存する。共有は URL（#plan=...）で行う
@@ -479,7 +518,7 @@ function renderSummary(result) {
       <div><dt>距離</dt><dd>${formatDistance(t.distanceMeters)}</dd></div>
       <div><dt>滞在・待ち</dt><dd>${formatDuration((t.stayMinutes + t.waitMinutes) * 60)}</dd></div>
     </dl>
-    <p class="conditions">ルートの条件: ${conditionText(result.options)}</p>`;
+    <p class="conditions">ルートの条件: ${planConditionText(result.legs)}</p>`;
   el.hidden = false;
 }
 
@@ -488,6 +527,19 @@ function conditionText(options = {}) {
   if (options.avoidTolls) parts.push('有料道路を使わない');
   if (options.avoidHighways) parts.push('高速道路を使わない');
   return parts.length ? parts.join('・') : '指定なし（有料道路・高速道路も使う）';
+}
+
+// 全区間が同じ条件ならその内容、違えば「区間ごと」
+function planConditionText(legs) {
+  const texts = [...new Set(legs.map((l) => conditionText(l.options)))];
+  return texts.length === 1 ? texts[0] : '区間ごとに指定';
+}
+
+function legConditionTags(options = {}) {
+  const tags = [];
+  if (options.avoidTolls) tags.push('有料道路なし');
+  if (options.avoidHighways) tags.push('高速道路なし');
+  return tags.map((t) => `<span class="tag tag-avoid">${t}</span>`).join('');
 }
 
 const UNAVOIDABLE = { toll: '有料道路', highway: '高速道路' };
@@ -544,7 +596,7 @@ function renderTimeline(result) {
       const legStops = [result.stops[i - 1], s];
       li.innerHTML = `
         <span class="tl-leg-line" aria-hidden="true"></span>
-        <span class="tl-leg-text">🚗 ${formatDuration(leg.durationSeconds)}・${formatDistance(leg.distanceMeters)}${leg.trafficAware ? '<span class="tag">渋滞予測</span>' : ''}</span>
+        <span class="tl-leg-text">🚗 ${formatDuration(leg.durationSeconds)}・${formatDistance(leg.distanceMeters)}${leg.trafficAware ? '<span class="tag">渋滞予測</span>' : ''}${legConditionTags(leg.options)}</span>
         ${leg.unavoidable?.length ? `<span class="tl-leg-warn">⚠ この区間は${leg.unavoidable.map((k) => UNAVOIDABLE[k]).join('・')}を通らないと行けません</span>` : ''}
         <a href="${escapeHtml(googleMapsUrl(legStops))}" target="_blank" rel="noopener" class="tl-link">この区間を Google マップで</a>`;
       el.append(li);
@@ -641,7 +693,7 @@ form.addEventListener('submit', async (e) => {
     renderSummary(data);
     renderLinks(data);
     renderTimeline(data);
-    showStatus(`計算しました（${formatTime(Date.now())}・${conditionText(data.options)}）`);
+    showStatus(`計算しました（${formatTime(Date.now())}・${planConditionText(data.legs)}）`);
     if (window.matchMedia('(max-width: 900px)').matches) $('#result-title').scrollIntoView({ behavior: 'smooth' });
   } catch (err) {
     showError(err.message || '通信に失敗しました');

@@ -19,8 +19,9 @@ export class InputError extends Error {
 }
 
 // リクエストの検証と正規化
-// stops[0] が出発地、以降が目的地。各地点は { place, placeId?, lat?, lng?, stayMinutes?, departAt? }
+// stops[0] が出発地、以降が目的地。各地点は { place, placeId?, lat?, lng?, stayMinutes?, departAt?, avoidTolls?, avoidHighways? }
 // placeId・lat/lng は候補から選んだときに付く。あればルート検索で place（文字）より優先する
+// avoidTolls・avoidHighways は「その地点まで」の区間の条件。地点にないときは全体の指定（body.avoidTolls など）を使う
 export function normalizePlan(body, { maxStops = 10 } = {}) {
   if (!body || !Array.isArray(body.stops)) throw new InputError('stops がありません');
   const stops = body.stops.map((s, i) => {
@@ -37,16 +38,14 @@ export function normalizePlan(body, { maxStops = 10 } = {}) {
       location: parseLocation(s.lat, s.lng),
       stayMinutes: i === 0 ? 0 : Math.round(stayMinutes),
       departAt: parseTime(s.departAt),
+      avoidTolls: i > 0 && Boolean(s.avoidTolls ?? body.avoidTolls),
+      avoidHighways: i > 0 && Boolean(s.avoidHighways ?? body.avoidHighways),
     };
   });
   if (stops.length < 2) throw new InputError('出発地と目的地を 1 つ以上入力してください');
   if (stops.length > maxStops) throw new InputError(`地点は ${maxStops} か所までです`);
   if (stops[0].departAt === null) throw new InputError('出発地の出発時刻を入力してください');
-  return {
-    stops,
-    avoidTolls: Boolean(body.avoidTolls),
-    avoidHighways: Boolean(body.avoidHighways),
-  };
+  return { stops };
 }
 
 // Google の Place ID。形式が違うものは無視して、文字で検索する
@@ -78,7 +77,6 @@ export function departureFor(stop, arrival) {
 // 区間の出発時刻は前の区間の到着で決まるので、順番に検索する
 export async function buildSchedule(plan, routeLeg) {
   const { stops } = plan;
-  const options = { avoidTolls: plan.avoidTolls, avoidHighways: plan.avoidHighways };
   const result = [];
   const legs = [];
 
@@ -86,6 +84,8 @@ export async function buildSchedule(plan, routeLeg) {
   result.push({ index: 0, place: stops[0].place, placeId: stops[0].placeId, pinned: Boolean(stops[0].location), arrival: null, departure, stayMinutes: 0, waitMinutes: 0, late: false });
 
   for (let i = 1; i < stops.length; i++) {
+    // 区間ごとの条件（stops[i] まで）
+    const options = { avoidTolls: stops[i].avoidTolls, avoidHighways: stops[i].avoidHighways };
     const leg = await routeLeg(stops[i - 1], stops[i], departure, options);
     const arrival = departure + leg.durationSeconds * 1000;
     legs.push({
@@ -98,10 +98,11 @@ export async function buildSchedule(plan, routeLeg) {
       polyline: leg.polyline,
       polylinePrecision: leg.polylinePrecision ?? 5,
       trafficAware: Boolean(leg.trafficAware),
+      options,
       // 「使わない」を指定したのに通らざるを得なかった道（OpenStreetMap のときだけ分かる）
       unavoidable: [
-        plan.avoidTolls && leg.hasToll ? 'toll' : null,
-        plan.avoidHighways && leg.hasHighway ? 'highway' : null,
+        options.avoidTolls && leg.hasToll ? 'toll' : null,
+        options.avoidHighways && leg.hasHighway ? 'highway' : null,
       ].filter(Boolean),
     });
     if (i === 1) result[0].location = leg.start ?? stops[0].location;
@@ -121,7 +122,6 @@ export async function buildSchedule(plan, routeLeg) {
   const first = result[0].departure;
   const last = result[result.length - 1].departure;
   return {
-    options,
     stops: result,
     legs,
     totals: {
