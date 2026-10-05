@@ -1,0 +1,22 @@
+// Cloudflare Workers の設定（MobileOrderInfra と同じ構成）。手順は docs/DEPLOY.md を参照
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "travel",
+  "main": "src/worker.js",
+  "compatibility_date": "2026-09-01",
+
+  // 画面（HTML・CSS・JS）は Worker を通さずに返す。/api/* だけ Worker が受け持つ
+  "assets": {
+    "directory": "./static",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*"]
+  },
+
+  // 公開してよい設定値。Google の API キーは `npx wrangler secret put GOOGLE_MAPS_API_KEY` で登録する
+  // （未登録なら OpenStreetMap でルートを検索する。渋滞は考慮しない）
+  "vars": {
+    "MAX_STOPS": "10"
+  },
+
+  "observability": { "enabled": true }
+}

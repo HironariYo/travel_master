@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ドライブ旅程プランナー</title>
+  <meta name="description" content="目的地と出発時刻を入れると、車のルートと全体のスケジュールを表示します">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🚗</text></svg>">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="site-header">
+    <h1>ドライブ旅程プランナー</h1>
+    <p class="lead">目的地と出発時刻・滞在時間を入れると、車のルートと全体のスケジュールを計算します。</p>
+  </header>
+
+  <main class="layout">
+    <section class="panel" aria-labelledby="plan-title">
+      <h2 id="plan-title">行き先</h2>
+      <form id="plan-form" novalidate>
+        <ol id="stops" class="stops"></ol>
+        <div class="row-actions">
+          <button type="button" id="add-stop" class="btn btn-ghost">＋ 目的地を追加</button>
+        </div>
+
+        <fieldset class="options">
+          <legend>ルートの条件</legend>
+          <label><input type="checkbox" name="avoidTolls"> 有料道路を使わない</label>
+          <label><input type="checkbox" name="avoidHighways"> 高速道路を使わない</label>
+        </fieldset>
+
+        <p class="hint">
+          「出発時刻」は空欄でもかまいません。空欄なら到着後、滞在時間だけ過ごしてから出発します。
+          指定した場合は、その時刻まで待ってから出発します（間に合わないときは警告します）。
+          住所・施設名のほか、<code>35.6812, 139.7671</code> のような座標でも入力できます。
+        </p>
+
+        <div class="submit-row">
+          <button type="submit" class="btn btn-primary" id="submit">ルートとスケジュールを計算</button>
+          <button type="button" class="btn btn-ghost" id="reset">クリア</button>
+        </div>
+        <p id="error" class="error" role="alert" hidden></p>
+      </form>
+    </section>
+
+    <section class="panel results" aria-labelledby="result-title">
+      <div class="results-head">
+        <h2 id="result-title">ルートとスケジュール</h2>
+        <span id="provider" class="badge" hidden></span>
+      </div>
+      <div id="map" class="map" role="region" aria-label="ルートの地図"></div>
+      <div id="summary" class="summary" hidden></div>
+      <div id="links" class="links" hidden></div>
+      <ol id="timeline" class="timeline"></ol>
+      <p id="empty" class="empty">出発地と目的地を入力して「計算」を押すと、ここにルートと時刻表が表示されます。</p>
+    </section>
+  </main>
+
+  <template id="stop-template">
+    <li class="stop">
+      <div class="stop-head">
+        <span class="stop-label"></span>
+        <div class="stop-tools">
+          <button type="button" class="icon-btn" data-action="up" aria-label="上へ">↑</button>
+          <button type="button" class="icon-btn" data-action="down" aria-label="下へ">↓</button>
+          <button type="button" class="icon-btn" data-action="remove" aria-label="削除">✕</button>
+        </div>
+      </div>
+      <label class="field field-place">
+        <span>場所</span>
+        <input type="text" name="place" autocomplete="off" placeholder="例: 東京駅、箱根湯本駅">
+      </label>
+      <div class="field-row">
+        <label class="field field-stay">
+          <span>滞在時間（分）</span>
+          <input type="number" name="stayMinutes" min="0" step="5" inputmode="numeric" value="60">
+        </label>
+        <label class="field field-depart">
+          <span class="depart-label">出発時刻</span>
+          <input type="datetime-local" name="departAt">
+        </label>
+      </div>
+    </li>
+  </template>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+  <script src="/app.js" type="module"></script>
+</body>
+</html>
