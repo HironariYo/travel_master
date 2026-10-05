@@ -228,3 +228,16 @@ body {
 .sugg-name { color: var(--text); font-weight: 600; }
 .sugg-detail { color: var(--muted); font-size: .8rem; }
 .sugg-empty { padding: 7px 12px; color: var(--muted); font-size: .85rem; }
+
+/* ---- 区間ごとの条件 ---- */
+
+.options-note { flex-basis: 100%; margin: 2px 0 0; font-size: .78rem; color: var(--muted); }
+.leg-options {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 2px 14px;
+  margin-top: 8px; padding-top: 8px;
+  border-top: 1px dashed var(--border);
+  font-size: .88rem;
+}
+.leg-options-label { flex-basis: 100%; color: var(--muted); font-size: .8rem; }
+.is-origin .leg-options { display: none; }
+.tag-avoid { color: var(--warn); }
