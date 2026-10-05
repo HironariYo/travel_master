@@ -1,5 +1,7 @@
 // Cloudflare Workers のエントリポイント
 // 画面（static/）は Static Assets がそのまま返す。Worker が受け持つのは /api/* だけ
+import parkingData from './data/tokyo-parking.json' with { type: 'json' };
+import { findParking, recheckParking } from './parking.js';
 import { googleSuggest, photonSuggest } from './places.js';
 import { googleRouter, osmRouter, RoutingError } from './routing.js';
 import { buildSchedule, InputError, normalizePlan } from './schedule.js';
@@ -35,7 +37,14 @@ export async function handleRoute(request, env) {
     const plan = normalizePlan(body, { maxStops: Number(env.MAX_STOPS) || 10 });
     const provider = env.GOOGLE_MAPS_API_KEY ? 'google' : 'osm';
     const routeLeg = provider === 'google' ? googleRouter(env.GOOGLE_MAPS_API_KEY) : osmRouter();
-    const schedule = await buildSchedule(plan, routeLeg);
+    const parking = {
+      find: (target, arrival, stay) => findParking(parkingData, target, arrival, stay),
+      recheck: (found, arrival, stay) => recheckParking(parkingData, found, arrival, stay),
+    };
+    const schedule = await buildSchedule(plan, routeLeg, { parking });
+    if (schedule.stops.some((s) => s.parking)) {
+      schedule.parkingSource = { text: parkingData.source, url: parkingData.sourceUrl, dataDate: parkingData.dataDate };
+    }
     return json({ provider, ...schedule });
   } catch (err) {
     if (err instanceof InputError) return json({ error: err.message }, 400);

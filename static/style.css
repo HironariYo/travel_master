@@ -241,3 +241,23 @@ body {
 .leg-options-label { flex-basis: 100%; color: var(--muted); font-size: .8rem; }
 .is-origin .leg-options { display: none; }
 .tag-avoid { color: var(--warn); }
+
+/* ---- 路上パーキング ---- */
+
+.parking-option {
+  display: flex; gap: 8px; align-items: flex-start;
+  margin-top: 8px; padding-top: 8px;
+  border-top: 1px dashed var(--border);
+  font-size: .88rem; cursor: pointer;
+}
+.parking-option input { margin-top: 3px; }
+.parking-option small { display: block; color: var(--muted); font-size: .76rem; }
+.is-origin .parking-option { display: none; }
+
+.parking { margin-top: 6px; padding: 6px 10px; border-left: 3px solid #475569; background: var(--accent-soft); border-radius: 0 6px 6px 0; font-size: .86rem; }
+.parking.is-none { border-left-color: var(--muted); color: var(--muted); }
+.parking-detail { color: var(--muted); font-size: .8rem; }
+.parking-warn { margin: 4px 0 0; padding: 0; list-style: none; color: var(--warn); font-size: .8rem; }
+.pin-parking { background: #475569; border-radius: 4px; font-size: 12px; }
+.source { margin: 12px 0 0; font-size: .75rem; color: var(--muted); }
+.source a { color: inherit; }

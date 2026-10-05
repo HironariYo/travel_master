@@ -32,7 +32,7 @@
         </fieldset>
 
         <p class="hint">
-          「出発時刻」は空欄でもかまいません。空欄なら到着後、滞在時間だけ過ごしてから出発します。
+          時刻はすべて日本時間です。「出発時刻」は空欄でもかまいません。空欄なら到着後、滞在時間だけ過ごしてから出発します。
           指定した場合は、その時刻まで待ってから出発します（間に合わないときは警告します）。
           場所は 2 文字以上打つと候補が出るので、そこから選んでください（✓ が付きます）。
           <code>35.6812, 139.7671</code> のような座標でも入力できます。
@@ -56,6 +56,7 @@
       <div id="summary" class="summary" hidden></div>
       <div id="links" class="links" hidden></div>
       <ol id="timeline" class="timeline"></ol>
+      <p id="source" class="source" hidden></p>
       <p id="empty" class="empty">出発地と目的地を入力して「計算」を押すと、ここにルートと時刻表が表示されます。</p>
     </section>
   </main>
@@ -94,6 +95,10 @@
         <label><input type="checkbox" name="legAvoidTolls"> 有料道路を使わない</label>
         <label><input type="checkbox" name="legAvoidHighways"> 高速道路を使わない</label>
       </div>
+      <label class="parking-option">
+        <input type="checkbox" name="parking">
+        <span>🅿 近くの路上パーキング（パーキング・メーター等）に停めて歩く<small>東京都内のみ。到着時刻の曜日・祝日・利用時間で使える区間を選びます</small></span>
+      </label>
     </li>
   </template>
 
