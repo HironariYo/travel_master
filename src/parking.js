@@ -8,7 +8,8 @@ const JST_OFFSET = 9 * 60 * 60 * 1000;
 const WALK_METERS_PER_MINUTE = 80;
 // 直線距離から歩く距離への目安（道は直線ではないので少し長めに見る）
 const WALK_DETOUR = 1.25;
-export const DEFAULT_RADIUS = 500;
+// 目的地からこの距離（m）より遠い区間は探さない
+export const DEFAULT_RADIUS = 1000;
 
 const CLOSED_LABEL = { sunHoliday: '日曜・休日', weekendHoliday: '土日・休日' };
 

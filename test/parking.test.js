@@ -65,7 +65,9 @@ test('使える区間を選び、徒歩と最大時間を見る', () => {
   assert.equal(sunday.status, 'unavailable');
   assert.match(sunday.reason, /日曜・休日は対象外/);
 
-  assert.equal(findParking(d, { lat: 35.8, lng: 139.8 }, at('2026-10-05T10:00:00'), 50).status, 'none', '500 m 以内にない');
+  // 区間の北 約 1.1 km（目的地から 1 km より遠い区間は探さない）
+  assert.equal(findParking(d, { lat: 35.691, lng: 139.701 }, at('2026-10-05T10:00:00'), 50).status, 'none', '1 km 以内にない');
+  assert.equal(findParking(d, { lat: 35.692, lng: 139.701 }, at('2026-10-05T10:00:00'), 50).status, 'ok', '約 1 km 以内ならある');
 });
 
 test('近い区間が使えないときは、使える区間を選ぶ。最大時間に収まる区間を優先する', () => {

@@ -605,6 +605,7 @@ function scheduleText(result) {
       .filter(Boolean)
       .join(' → ');
     lines.push(`${head}: ${s.place}  ${times}`);
+    if (s.parking && s.parking.status !== 'ok') lines.push('  🅿 路上駐車場なし');
     if (s.parking?.status === 'ok') {
       const p = s.parking;
       lines.push(`  🅿 路上パーキング: 目的地から約${p.distanceMeters}m（徒歩${p.walkMinutes}分） ${parkingDetail(p)} https://www.google.com/maps/search/?api=1&query=${p.point.lat},${p.point.lng}`);
@@ -647,13 +648,9 @@ function parkingHtml(s) {
         ${warns ? `<ul class="parking-warn">${warns}</ul>` : ''}
       </div>`;
   }
-  const message =
-    p.status === 'unavailable'
-      ? `近くの路上パーキング（約${p.distanceMeters}m・${p.zone.hours}）は到着時刻に使えません（${p.reason}）`
-      : p.radius
-        ? `目的地から${p.radius}m以内に路上パーキングの区間がありません（東京都内のみ対応）`
-        : p.reason;
-  return `<div class="parking is-none">🅿 ${escapeHtml(message)}。目的地まで車で向かうルートにしています。</div>`;
+  // 1 km 以内に使える区間がない。近くにあっても到着時刻に使えないときは、その理由だけ添える
+  const reason = p.status === 'unavailable' ? `（近くの区間は${p.reason}）` : '';
+  return `<div class="parking is-none">🅿 路上駐車場なし${escapeHtml(reason)}</div>`;
 }
 
 function renderTimeline(result) {
