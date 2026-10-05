@@ -33,7 +33,8 @@
         <p class="hint">
           「出発時刻」は空欄でもかまいません。空欄なら到着後、滞在時間だけ過ごしてから出発します。
           指定した場合は、その時刻まで待ってから出発します（間に合わないときは警告します）。
-          住所・施設名のほか、<code>35.6812, 139.7671</code> のような座標でも入力できます。
+          場所は 2 文字以上打つと候補が出るので、そこから選んでください（✓ が付きます）。
+          <code>35.6812, 139.7671</code> のような座標でも入力できます。
         </p>
 
         <div class="submit-row">
@@ -41,6 +42,7 @@
           <button type="button" class="btn btn-ghost" id="reset">クリア</button>
         </div>
         <p id="error" class="error" role="alert" hidden></p>
+        <p id="status" class="status" role="status" hidden></p>
       </form>
     </section>
 
@@ -67,10 +69,15 @@
           <button type="button" class="icon-btn" data-action="remove" aria-label="削除">✕</button>
         </div>
       </div>
-      <label class="field field-place">
-        <span>場所</span>
-        <input type="text" name="place" autocomplete="off" placeholder="例: 東京駅、箱根湯本駅">
-      </label>
+      <div class="field field-place">
+        <label class="place-label">場所</label>
+        <div class="combo">
+          <input type="text" name="place" autocomplete="off" placeholder="例: 東京駅、箱根、江ノ島" role="combobox"
+                 aria-autocomplete="list" aria-expanded="false">
+          <span class="place-check" title="候補から選んだ場所" hidden>✓</span>
+          <ul class="suggestions" role="listbox" hidden></ul>
+        </div>
+      </div>
       <div class="field-row">
         <label class="field field-stay">
           <span>滞在時間（分）</span>

@@ -19,7 +19,8 @@ export class InputError extends Error {
 }
 
 // リクエストの検証と正規化
-// stops[0] が出発地、以降が目的地。各地点は { place, stayMinutes?, departAt? }
+// stops[0] が出発地、以降が目的地。各地点は { place, placeId?, lat?, lng?, stayMinutes?, departAt? }
+// placeId・lat/lng は候補から選んだときに付く。あればルート検索で place（文字）より優先する
 export function normalizePlan(body, { maxStops = 10 } = {}) {
   if (!body || !Array.isArray(body.stops)) throw new InputError('stops がありません');
   const stops = body.stops.map((s, i) => {
@@ -30,7 +31,13 @@ export function normalizePlan(body, { maxStops = 10 } = {}) {
     if (!Number.isFinite(stayMinutes) || stayMinutes < 0 || stayMinutes > 7 * 24 * 60) {
       throw new InputError(`${i + 1} 番目の滞在時間が正しくありません`);
     }
-    return { place, stayMinutes: i === 0 ? 0 : Math.round(stayMinutes), departAt: parseTime(s.departAt) };
+    return {
+      place,
+      placeId: parsePlaceId(s.placeId),
+      location: parseLocation(s.lat, s.lng),
+      stayMinutes: i === 0 ? 0 : Math.round(stayMinutes),
+      departAt: parseTime(s.departAt),
+    };
   });
   if (stops.length < 2) throw new InputError('出発地と目的地を 1 つ以上入力してください');
   if (stops.length > maxStops) throw new InputError(`地点は ${maxStops} か所までです`);
@@ -40,6 +47,19 @@ export function normalizePlan(body, { maxStops = 10 } = {}) {
     avoidTolls: Boolean(body.avoidTolls),
     avoidHighways: Boolean(body.avoidHighways),
   };
+}
+
+// Google の Place ID。形式が違うものは無視して、文字で検索する
+function parsePlaceId(value) {
+  return typeof value === 'string' && /^[A-Za-z0-9_-]{1,512}$/.test(value) ? value : null;
+}
+
+function parseLocation(lat, lng) {
+  if (lat === undefined || lat === null || lat === '' || lng === undefined || lng === null || lng === '') return null;
+  const la = Number(lat);
+  const ln = Number(lng);
+  if (!Number.isFinite(la) || !Number.isFinite(ln) || Math.abs(la) > 90 || Math.abs(ln) > 180) return null;
+  return { lat: la, lng: ln };
 }
 
 // 地点 i を出る時刻: 到着 + 滞在時間 と、指定の出発時刻の遅いほう
@@ -54,7 +74,7 @@ export function departureFor(stop, arrival) {
 }
 
 // 区間ごとにルートを検索しながら旅程を組み立てる
-// routeLeg(origin, destination, departureMs, options) => { durationSeconds, distanceMeters, polyline, start, end, trafficAware }
+// routeLeg(originStop, destinationStop, departureMs, options) => { durationSeconds, distanceMeters, polyline, start, end, trafficAware }
 // 区間の出発時刻は前の区間の到着で決まるので、順番に検索する
 export async function buildSchedule(plan, routeLeg) {
   const { stops } = plan;
@@ -63,10 +83,10 @@ export async function buildSchedule(plan, routeLeg) {
   const legs = [];
 
   let departure = stops[0].departAt;
-  result.push({ index: 0, place: stops[0].place, arrival: null, departure, stayMinutes: 0, waitMinutes: 0, late: false });
+  result.push({ index: 0, place: stops[0].place, placeId: stops[0].placeId, pinned: Boolean(stops[0].location), arrival: null, departure, stayMinutes: 0, waitMinutes: 0, late: false });
 
   for (let i = 1; i < stops.length; i++) {
-    const leg = await routeLeg(stops[i - 1].place, stops[i].place, departure, options);
+    const leg = await routeLeg(stops[i - 1], stops[i], departure, options);
     const arrival = departure + leg.durationSeconds * 1000;
     legs.push({
       from: i - 1,
@@ -76,12 +96,18 @@ export async function buildSchedule(plan, routeLeg) {
       durationSeconds: leg.durationSeconds,
       distanceMeters: leg.distanceMeters,
       polyline: leg.polyline,
+      polylinePrecision: leg.polylinePrecision ?? 5,
       trafficAware: Boolean(leg.trafficAware),
+      // 「使わない」を指定したのに通らざるを得なかった道（OpenStreetMap のときだけ分かる）
+      unavoidable: [
+        plan.avoidTolls && leg.hasToll ? 'toll' : null,
+        plan.avoidHighways && leg.hasHighway ? 'highway' : null,
+      ].filter(Boolean),
     });
-    if (i === 1 && leg.start) result[0].location = leg.start;
+    if (i === 1) result[0].location = leg.start ?? stops[0].location;
 
     const isLast = i === stops.length - 1;
-    const stop = { index: i, place: stops[i].place, arrival, stayMinutes: stops[i].stayMinutes, location: leg.end ?? null };
+    const stop = { index: i, place: stops[i].place, placeId: stops[i].placeId, pinned: Boolean(stops[i].location), arrival, stayMinutes: stops[i].stayMinutes, location: leg.end ?? stops[i].location };
     if (isLast && stops[i].departAt === null) {
       // 最終目的地: 出発時刻の指定がなければ、滞在の終わりを「終了」とする
       Object.assign(stop, { departure: arrival + stops[i].stayMinutes * MINUTE, waitMinutes: 0, late: false, final: true });
@@ -95,6 +121,7 @@ export async function buildSchedule(plan, routeLeg) {
   const first = result[0].departure;
   const last = result[result.length - 1].departure;
   return {
+    options,
     stops: result,
     legs,
     totals: {

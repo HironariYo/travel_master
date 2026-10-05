@@ -1,6 +1,6 @@
 // 車のルート検索
 // - GOOGLE_MAPS_API_KEY があれば Google Routes API（渋滞予測つき）
-// - なければ OpenStreetMap（Nominatim で住所を座標に、OSRM でルート）。開発・お試し用で、渋滞は考慮しない
+// - なければ OpenStreetMap（Nominatim で住所を座標に、Valhalla でルート）。開発・お試し用で、渋滞は考慮しない
 import { InputError } from './schedule.js';
 
 export class RoutingError extends Error {
@@ -35,10 +35,12 @@ const FIELD_MASK = [
   'routes.legs.endLocation',
 ].join(',');
 
-function googleWaypoint(place) {
-  const ll = parseLatLng(place);
+// 候補から選んだ地点は Place ID か座標、手で打った地点は文字（座標の形なら座標）で渡す
+function googleWaypoint(stop) {
+  if (stop.placeId) return { placeId: stop.placeId };
+  const ll = stop.location ?? parseLatLng(stop.place);
   if (ll) return { location: { latLng: { latitude: ll.lat, longitude: ll.lng } } };
-  return { address: place };
+  return { address: stop.place };
 }
 
 function seconds(duration) {
@@ -52,12 +54,12 @@ function fromGoogleLatLng(loc) {
 }
 
 export function googleRouter(apiKey, fetchImpl = fetch) {
-  return async function routeLeg(origin, destination, departureMs, { avoidTolls, avoidHighways } = {}, now = Date.now()) {
+  return async function routeLeg(from, to, departureMs, { avoidTolls, avoidHighways } = {}, now = Date.now()) {
     // 渋滞予測は未来の出発時刻でしか使えない（過去を指定するとエラーになる）
     const trafficAware = departureMs > now + 60 * 1000;
     const body = {
-      origin: googleWaypoint(origin),
-      destination: googleWaypoint(destination),
+      origin: googleWaypoint(from),
+      destination: googleWaypoint(to),
       travelMode: 'DRIVE',
       routingPreference: trafficAware ? 'TRAFFIC_AWARE' : 'TRAFFIC_UNAWARE',
       languageCode: 'ja',
@@ -75,11 +77,11 @@ export function googleRouter(apiKey, fetchImpl = fetch) {
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       console.error('[routes api]', res.status, JSON.stringify(data?.error ?? data));
-      if (res.status === 400) throw new InputError(`「${origin}」→「${destination}」のルートを検索できませんでした。地点を見直してください`);
+      if (res.status === 400) throw new InputError(`「${from.place}」→「${to.place}」のルートを検索できませんでした。地点を候補から選び直してください`);
       throw new RoutingError('ルート検索サービスでエラーが発生しました');
     }
     const route = data.routes?.[0];
-    if (!route) throw new InputError(`「${origin}」→「${destination}」の車のルートが見つかりませんでした`);
+    if (!route) throw new InputError(`「${from.place}」→「${to.place}」の車のルートが見つかりませんでした`);
     const leg = route.legs?.[0] ?? {};
     return {
       durationSeconds: seconds(route.duration),
@@ -92,44 +94,74 @@ export function googleRouter(apiKey, fetchImpl = fetch) {
   };
 }
 
-// ---- OpenStreetMap（Nominatim + OSRM のデモサーバー） ----
+// ---- OpenStreetMap（Nominatim + Valhalla の公開サーバー） ----
+// OSRM の公開サーバーは「有料道路・高速道路を使わない」に対応していないので Valhalla を使う
+// https://valhalla.github.io/valhalla/api/turn-by-turn/api-reference/
 // どちらも公開サーバーの利用規約があり（Nominatim は 1 秒 1 回まで）、本番での常用は想定しない
 
 const USER_AGENT = 'travel-master/0.1 (route planner)';
+const VALHALLA_URL = 'https://valhalla1.openstreetmap.de/route';
 
 export function osmRouter(fetchImpl = fetch) {
   const cache = new Map();
 
-  async function geocode(place) {
-    const ll = parseLatLng(place);
+  async function geocode({ place, location }) {
+    const ll = location ?? parseLatLng(place);
     if (ll) return ll;
     if (cache.has(place)) return cache.get(place);
     const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&accept-language=ja&q=${encodeURIComponent(place)}`;
     const res = await fetchImpl(url, { headers: { 'User-Agent': USER_AGENT, Accept: 'application/json' } });
     if (!res.ok) throw new RoutingError('住所の検索サービスでエラーが発生しました');
     const [hit] = await res.json();
-    if (!hit) throw new InputError(`「${place}」が見つかりませんでした。住所や座標（35.68, 139.76）で入力してください`);
+    if (!hit) throw new InputError(`「${place}」が見つかりませんでした。入力中に出る候補から選んでください`);
     const result = { lat: Number(hit.lat), lng: Number(hit.lon) };
     cache.set(place, result);
     return result;
   }
 
-  return async function routeLeg(origin, destination) {
-    const a = await geocode(origin);
-    const b = await geocode(destination);
-    const url = `https://router.project-osrm.org/route/v1/driving/${a.lng},${a.lat};${b.lng},${b.lat}?overview=full&geometries=polyline`;
-    const res = await fetchImpl(url, { headers: { 'User-Agent': USER_AGENT } });
+  return async function routeLeg(from, to, departureMs, { avoidTolls, avoidHighways } = {}) {
+    const a = await geocode(from);
+    const b = await geocode(to);
+    // 0 にすると、その道をできるだけ避ける（ほかに道がなければ通る。そのときは hasToll などで知らせる）
+    const auto = {};
+    if (avoidTolls) auto.use_tolls = 0;
+    if (avoidHighways) auto.use_highways = 0;
+    const res = await fetchImpl(VALHALLA_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'User-Agent': USER_AGENT },
+      body: JSON.stringify({
+        locations: [
+          { lat: a.lat, lon: a.lng },
+          { lat: b.lat, lon: b.lng },
+        ],
+        costing: 'auto',
+        costing_options: { auto },
+        units: 'kilometers',
+        directions_type: 'none',
+      }),
+    });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok && data?.code !== 'NoRoute') throw new RoutingError('ルート検索サービスでエラーが発生しました');
-    const route = data.routes?.[0];
-    if (!route) throw new InputError(`「${origin}」→「${destination}」の車のルートが見つかりませんでした`);
+    if (!res.ok) {
+      // 4xx で error_code があるのは「道が見つからない」など入力側の問題（442: 経路なし、171: 近くに道がない など）
+      if (res.status >= 400 && res.status < 500 && data?.error_code) {
+        throw new InputError(`「${from.place}」→「${to.place}」の車のルートが見つかりませんでした`);
+      }
+      console.error('[valhalla]', res.status, JSON.stringify(data));
+      throw new RoutingError('ルート検索サービスでエラーが発生しました');
+    }
+    const trip = data.trip;
+    const leg = trip?.legs?.[0];
+    if (!trip || !leg) throw new InputError(`「${from.place}」→「${to.place}」の車のルートが見つかりませんでした`);
     return {
-      durationSeconds: Math.round(route.duration),
-      distanceMeters: Math.round(route.distance),
-      polyline: route.geometry,
+      durationSeconds: Math.round(trip.summary.time),
+      distanceMeters: Math.round(trip.summary.length * 1000),
+      polyline: leg.shape,
+      polylinePrecision: 6,
       start: a,
       end: b,
       trafficAware: false,
+      hasToll: Boolean(trip.summary.has_toll),
+      hasHighway: Boolean(trip.summary.has_highway),
     };
   };
 }

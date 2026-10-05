@@ -32,7 +32,9 @@ function addStop(values = {}) {
     return;
   }
   const node = template.content.firstElementChild.cloneNode(true);
+  setupCombo(node);
   $('[name=place]', node).value = values.place ?? '';
+  setSelection(node, values.placeId || Number.isFinite(values.lat) ? values : null);
   $('[name=stayMinutes]', node).value = values.stayMinutes ?? 60;
   $('[name=departAt]', node).value = values.departAt ?? '';
   stopsEl.append(node);
@@ -81,12 +83,17 @@ $('#reset').addEventListener('click', () => {
   save();
 });
 
-form.addEventListener('input', save);
+form.addEventListener('input', () => {
+  save();
+  // 結果を出したあとに入力を変えたら、まだ反映されていないことを知らせる
+  if (!$('#summary').hidden) showStatus('入力が変わりました。「ルートとスケジュールを計算」を押すと反映されます');
+});
 
 function readForm() {
   return {
     stops: [...stopsEl.children].map((li) => ({
       place: $('[name=place]', li).value.trim(),
+      ...selectionOf(li),
       stayMinutes: Number($('[name=stayMinutes]', li).value || 0),
       departAt: $('[name=departAt]', li).value,
     })),
@@ -141,6 +148,189 @@ function loadInitialPlan() {
   return { plan: { stops: [{ departAt: defaultStart(), stayMinutes: 0 }, {}] }, fromUrl: false };
 }
 
+// ---------- 場所の候補 ----------
+// 2 文字以上打つと /api/places に問い合わせ、候補を一覧で出す。選ぶと Place ID か座標を地点に覚えさせる
+
+const SUGGEST_DELAY = 250;
+let listSeq = 0;
+
+function selectionOf(li) {
+  const d = li.dataset;
+  const out = {};
+  if (d.placeId) out.placeId = d.placeId;
+  if (d.lat && d.lng) Object.assign(out, { lat: Number(d.lat), lng: Number(d.lng) });
+  return out;
+}
+
+// 候補を選んだ状態（placeId・座標と、選んだときの文字）を地点に保存する。null で解除
+function setSelection(li, sel) {
+  const d = li.dataset;
+  delete d.placeId;
+  delete d.lat;
+  delete d.lng;
+  delete d.selectedText;
+  if (sel) {
+    if (sel.placeId) d.placeId = sel.placeId;
+    if (Number.isFinite(sel.lat) && Number.isFinite(sel.lng)) {
+      d.lat = String(sel.lat);
+      d.lng = String(sel.lng);
+    }
+    d.selectedText = sel.place ?? sel.name;
+  }
+  $('.place-check', li).hidden = !sel;
+  li.classList.toggle('is-selected', Boolean(sel));
+}
+
+// 候補の検索を近くに寄せる: 直前の地点（なければ直後の地点）で選んだ場所の座標
+function nearFor(li) {
+  for (const sib of [li.previousElementSibling, li.nextElementSibling]) {
+    if (sib?.dataset.lat) return { lat: sib.dataset.lat, lng: sib.dataset.lng };
+  }
+  return null;
+}
+
+function newSessionToken() {
+  return crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function setupCombo(li) {
+  const input = $('[name=place]', li);
+  const list = $('.suggestions', li);
+  const id = `sugg-${++listSeq}`;
+  list.id = id;
+  input.id = `${id}-input`;
+  $('.place-label', li).htmlFor = input.id;
+  input.setAttribute('aria-controls', id);
+  let items = [];
+  let active = -1;
+  let timer = null;
+  let controller = null;
+  let session = null;
+
+  function close() {
+    list.hidden = true;
+    list.replaceChildren();
+    input.setAttribute('aria-expanded', 'false');
+    input.removeAttribute('aria-activedescendant');
+    items = [];
+    active = -1;
+  }
+
+  function highlight(i) {
+    active = i;
+    [...list.children].forEach((el, j) => el.setAttribute('aria-selected', String(j === i)));
+    if (i >= 0) {
+      input.setAttribute('aria-activedescendant', `${id}-${i}`);
+      list.children[i]?.scrollIntoView({ block: 'nearest' });
+    } else input.removeAttribute('aria-activedescendant');
+  }
+
+  function choose(i) {
+    const item = items[i];
+    if (!item) return;
+    input.value = item.name;
+    setSelection(li, { ...item, place: item.name });
+    session = null; // 選んだらセッションは終わり
+    close();
+    save();
+  }
+
+  function render(message) {
+    list.replaceChildren();
+    if (message) {
+      const el = document.createElement('li');
+      el.className = 'sugg-empty';
+      el.textContent = message;
+      list.append(el);
+    }
+    items.forEach((item, i) => {
+      const el = document.createElement('li');
+      el.id = `${id}-${i}`;
+      el.setAttribute('role', 'option');
+      el.setAttribute('aria-selected', 'false');
+      const name = document.createElement('span');
+      name.className = 'sugg-name';
+      name.textContent = item.name;
+      el.append(name);
+      if (item.detail) {
+        const detail = document.createElement('span');
+        detail.className = 'sugg-detail';
+        detail.textContent = item.detail;
+        el.append(detail);
+      }
+      // blur より先に選べるよう mousedown で拾う
+      el.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        choose(i);
+      });
+      list.append(el);
+    });
+    list.hidden = false;
+    input.setAttribute('aria-expanded', 'true');
+    active = -1;
+  }
+
+  async function search(q) {
+    controller?.abort();
+    controller = new AbortController();
+    session ??= newSessionToken();
+    const params = new URLSearchParams({ q, session });
+    const near = nearFor(li);
+    if (near) {
+      params.set('lat', near.lat);
+      params.set('lng', near.lng);
+    }
+    try {
+      const res = await fetch(`/api/places?${params}`, { signal: controller.signal });
+      const data = await res.json().catch(() => ({}));
+      if (input.value.trim() !== q || document.activeElement !== input) return;
+      if (!res.ok) {
+        items = [];
+        return render(data.error || '候補を取得できませんでした');
+      }
+      items = data.suggestions ?? [];
+      render(items.length ? '' : '候補が見つかりません。別の言葉でお試しください');
+    } catch (err) {
+      if (err.name !== 'AbortError') {
+        items = [];
+        render('候補を取得できませんでした');
+      }
+    }
+  }
+
+  input.addEventListener('input', () => {
+    // 選んだあとに文字を変えたら、選択は取り消す
+    if (li.dataset.selectedText !== undefined && input.value !== li.dataset.selectedText) setSelection(li, null);
+    clearTimeout(timer);
+    const q = input.value.trim();
+    if (q.length < 2) return close();
+    timer = setTimeout(() => search(q), SUGGEST_DELAY);
+  });
+
+  input.addEventListener('keydown', (e) => {
+    if (list.hidden || !items.length) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      highlight((active + 1) % items.length);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      highlight(active <= 0 ? items.length - 1 : active - 1);
+    } else if (e.key === 'Enter') {
+      // 候補が開いているときの Enter は送信ではなく選択
+      e.preventDefault();
+      choose(active >= 0 ? active : 0);
+    } else if (e.key === 'Escape') {
+      close();
+    }
+  });
+
+  input.addEventListener('blur', () => {
+    clearTimeout(timer);
+    controller?.abort();
+    close();
+  });
+}
+
 // ---------- 地図 ----------
 
 // 地図ライブラリ（Leaflet）が読み込めなくても、時刻表は使えるようにする
@@ -156,8 +346,9 @@ if (map) {
 }
 const routeLayer = map ? L.featureGroup().addTo(map) : null;
 
-// Google / OSRM の encoded polyline（精度 1e5）を座標の配列にする
-function decodePolyline(str) {
+// encoded polyline を座標の配列にする。精度は Google が 1e5、Valhalla（OpenStreetMap）が 1e6
+function decodePolyline(str, precision = 5) {
+  const factor = 10 ** precision;
   const points = [];
   let index = 0;
   let lat = 0;
@@ -176,7 +367,7 @@ function decodePolyline(str) {
       if (axis === 0) lat += delta;
       else lng += delta;
     }
-    points.push([lat / 1e5, lng / 1e5]);
+    points.push([lat / factor, lng / factor]);
   }
   return points;
 }
@@ -190,7 +381,7 @@ function drawMap(result) {
   routeLayer.clearLayers();
   result.legs.forEach((leg, i) => {
     if (!leg.polyline) return;
-    L.polyline(decodePolyline(leg.polyline), { color: LEG_COLORS[i % LEG_COLORS.length], weight: 5, opacity: 0.85 })
+    L.polyline(decodePolyline(leg.polyline, leg.polylinePrecision), { color: LEG_COLORS[i % LEG_COLORS.length], weight: 5, opacity: 0.85 })
       .bindTooltip(`${leg.from === 0 ? '出発地' : `目的地 ${leg.from}`} → 目的地 ${leg.to}：${formatDuration(leg.durationSeconds)}`)
       .addTo(routeLayer);
   });
@@ -245,23 +436,35 @@ function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 }
 
+// Google マップに渡す場所: Place ID があれば名前と ID、OpenStreetMap の候補から選んだ地点は座標、それ以外は打った文字
 function placeParam(s) {
-  return s.location ? `${s.location.lat},${s.location.lng}` : s.place;
+  if (!s.placeId && s.pinned && s.location) return `${s.location.lat},${s.location.lng}`;
+  return s.place;
 }
 
 // Google マップのルート URL（https://developers.google.com/maps/documentation/urls/get-started）
 // 出発時刻は URL では指定できないので、時刻の検証は Google マップ側で行う
 function googleMapsUrl(stops) {
   const params = new URLSearchParams({ api: '1', travelmode: 'driving' });
-  params.set('origin', stops[0].place);
-  params.set('destination', stops[stops.length - 1].place);
-  const mid = stops.slice(1, -1).map((s) => s.place);
-  if (mid.length) params.set('waypoints', mid.join('|'));
+  const first = stops[0];
+  const last = stops[stops.length - 1];
+  const mid = stops.slice(1, -1);
+  params.set('origin', placeParam(first));
+  if (first.placeId) params.set('origin_place_id', first.placeId);
+  params.set('destination', placeParam(last));
+  if (last.placeId) params.set('destination_place_id', last.placeId);
+  if (mid.length) {
+    params.set('waypoints', mid.map(placeParam).join('|'));
+    // waypoint_place_ids は waypoints と同じ数でないと無視されるので、全部あるときだけ付ける
+    if (mid.every((s) => s.placeId)) params.set('waypoint_place_ids', mid.map((s) => s.placeId).join('|'));
+  }
   return `https://www.google.com/maps/dir/?${params}`;
 }
 
 function googlePlaceUrl(s) {
-  return `https://www.google.com/maps/search/?${new URLSearchParams({ api: '1', query: s.place })}`;
+  const params = new URLSearchParams({ api: '1', query: placeParam(s) });
+  if (s.placeId) params.set('query_place_id', s.placeId);
+  return `https://www.google.com/maps/search/?${params}`;
 }
 
 function renderSummary(result) {
@@ -275,9 +478,19 @@ function renderSummary(result) {
       <div><dt>運転</dt><dd>${formatDuration(t.driveSeconds)}</dd></div>
       <div><dt>距離</dt><dd>${formatDistance(t.distanceMeters)}</dd></div>
       <div><dt>滞在・待ち</dt><dd>${formatDuration((t.stayMinutes + t.waitMinutes) * 60)}</dd></div>
-    </dl>`;
+    </dl>
+    <p class="conditions">ルートの条件: ${conditionText(result.options)}</p>`;
   el.hidden = false;
 }
+
+function conditionText(options = {}) {
+  const parts = [];
+  if (options.avoidTolls) parts.push('有料道路を使わない');
+  if (options.avoidHighways) parts.push('高速道路を使わない');
+  return parts.length ? parts.join('・') : '指定なし（有料道路・高速道路も使う）';
+}
+
+const UNAVOIDABLE = { toll: '有料道路', highway: '高速道路' };
 
 function renderLinks(result) {
   const el = $('#links');
@@ -332,6 +545,7 @@ function renderTimeline(result) {
       li.innerHTML = `
         <span class="tl-leg-line" aria-hidden="true"></span>
         <span class="tl-leg-text">🚗 ${formatDuration(leg.durationSeconds)}・${formatDistance(leg.distanceMeters)}${leg.trafficAware ? '<span class="tag">渋滞予測</span>' : ''}</span>
+        ${leg.unavoidable?.length ? `<span class="tl-leg-warn">⚠ この区間は${leg.unavoidable.map((k) => UNAVOIDABLE[k]).join('・')}を通らないと行けません</span>` : ''}
         <a href="${escapeHtml(googleMapsUrl(legStops))}" target="_blank" rel="noopener" class="tl-link">この区間を Google マップで</a>`;
       el.append(li);
     }
@@ -376,6 +590,13 @@ function clearResults() {
   $('#links').hidden = true;
   $('#empty').hidden = false;
   showError('');
+  showStatus('');
+}
+
+function showStatus(message) {
+  const el = $('#status');
+  el.textContent = message;
+  el.hidden = !message;
 }
 
 function showError(message) {
@@ -401,6 +622,7 @@ form.addEventListener('submit', async (e) => {
   };
 
   const btn = $('#submit');
+  showStatus('');
   btn.disabled = true;
   btn.textContent = '計算中…';
   try {
@@ -419,6 +641,7 @@ form.addEventListener('submit', async (e) => {
     renderSummary(data);
     renderLinks(data);
     renderTimeline(data);
+    showStatus(`計算しました（${formatTime(Date.now())}・${conditionText(data.options)}）`);
     if (window.matchMedia('(max-width: 900px)').matches) $('#result-title').scrollIntoView({ behavior: 'smooth' });
   } catch (err) {
     showError(err.message || '通信に失敗しました');

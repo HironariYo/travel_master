@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { googleRouter, parseLatLng } from '../src/routing.js';
+import { googleSuggest, photonSuggest } from '../src/places.js';
+import { googleRouter, osmRouter, parseLatLng } from '../src/routing.js';
 import { buildSchedule, InputError, normalizePlan } from '../src/schedule.js';
 import worker from '../src/worker.js';
 
@@ -98,7 +99,13 @@ test('Google Routes API: 未来の出発は渋滞予測つきで検索する', a
       ],
     });
   };
-  const leg = await googleRouter('KEY', fakeFetch)('東京駅', '35.1, 139.1', T0, { avoidTolls: true }, T0 - 3600 * 1000);
+  const leg = await googleRouter('KEY', fakeFetch)(
+    { place: '東京駅' },
+    { place: '35.1, 139.1' },
+    T0,
+    { avoidTolls: true },
+    T0 - 3600 * 1000,
+  );
   assert.equal(sent.init.headers['X-Goog-Api-Key'], 'KEY');
   assert.equal(sent.body.routingPreference, 'TRAFFIC_AWARE');
   assert.equal(sent.body.departureTime, new Date(T0).toISOString());
@@ -115,7 +122,9 @@ test('Google Routes API: 未来の出発は渋滞予測つきで検索する', a
   });
 
   // 過去の出発時刻では departureTime を送らない（API がエラーにするため）
-  await googleRouter('KEY', fakeFetch)('A', 'B', T0, {}, T0 + 3600 * 1000);
+  await googleRouter('KEY', fakeFetch)({ place: 'A', placeId: 'ChIJabc' }, { place: 'B', location: { lat: 1, lng: 2 } }, T0, {}, T0 + 3600 * 1000);
+  assert.deepEqual(sent.body.origin, { placeId: 'ChIJabc' }, '候補から選んだ地点は Place ID で検索する');
+  assert.deepEqual(sent.body.destination, { location: { latLng: { latitude: 1, longitude: 2 } } });
   assert.equal(sent.body.routingPreference, 'TRAFFIC_UNAWARE');
   assert.equal(sent.body.departureTime, undefined);
 });
@@ -134,4 +143,141 @@ test('API: 入力が正しくなければ 400、他のサイトからの呼び�
 
   const page = await worker.fetch(new Request('https://travel.example/'), env);
   assert.equal(await page.text(), 'asset');
+});
+
+test('候補から選んだ Place ID・座標を検証して地点に持たせる', async () => {
+  const plan = normalizePlan({
+    stops: [
+      { place: '東京駅', placeId: 'ChIJ-abc_123', departAt: new Date(T0).toISOString() },
+      { place: '箱根', lat: 35.23, lng: 139.1 },
+      { place: '変な値', placeId: 'a b<script>', lat: 'x', lng: 200 },
+    ],
+  });
+  assert.equal(plan.stops[0].placeId, 'ChIJ-abc_123');
+  assert.deepEqual(plan.stops[1].location, { lat: 35.23, lng: 139.1 });
+  assert.equal(plan.stops[2].placeId, null);
+  assert.equal(plan.stops[2].location, null);
+
+  const seen = [];
+  const r = await buildSchedule(plan, async (from, to) => {
+    seen.push([from.place, to.place]);
+    return { durationSeconds: 60, distanceMeters: 1, polyline: '', start: null, end: null };
+  });
+  assert.deepEqual(seen, [['東京駅', '箱根'], ['箱根', '変な値']]);
+  assert.deepEqual(r.stops[1].location, { lat: 35.23, lng: 139.1 }, 'ルート検索が座標を返さなくても選んだ座標を使う');
+  assert.equal(r.stops[1].pinned, true);
+  assert.equal(r.stops[0].placeId, 'ChIJ-abc_123');
+});
+
+test('場所の候補: Google Places API の結果を整える', async () => {
+  let sent;
+  const fakeFetch = async (url, init) => {
+    sent = { url, body: JSON.parse(init.body), headers: init.headers };
+    return Response.json({
+      suggestions: [
+        {
+          placePrediction: {
+            placeId: 'P1',
+            text: { text: '箱根湯本駅、日本、神奈川県足柄下郡箱根町' },
+            structuredFormat: { mainText: { text: '箱根湯本駅' }, secondaryText: { text: '日本、神奈川県足柄下郡箱根町' } },
+          },
+        },
+        { queryPrediction: { text: { text: '箱根 温泉' } } },
+      ],
+    });
+  };
+  const out = await googleSuggest('KEY', { q: '箱根', near: { lat: 35, lng: 139 }, sessionToken: 'tok' }, fakeFetch);
+  assert.deepEqual(out, [{ name: '箱根湯本駅', detail: '日本、神奈川県足柄下郡箱根町', placeId: 'P1' }]);
+  assert.equal(sent.body.input, '箱根');
+  assert.equal(sent.body.sessionToken, 'tok');
+  assert.deepEqual(sent.body.includedRegionCodes, ['jp']);
+  assert.equal(sent.body.locationBias.circle.center.latitude, 35);
+});
+
+test('場所の候補: Photon の結果からバス停と重複を除く', async () => {
+  const feature = (name, props, coords = [139.07, 35.1]) => ({
+    geometry: { coordinates: coords },
+    properties: { name, countrycode: 'JP', ...props },
+  });
+  const fakeFetch = async () =>
+    Response.json({
+      features: [
+        feature('熱海駅', { osm_value: 'bus_stop', state: '静岡県', city: '熱海市' }),
+        feature('熱海駅', { osm_value: 'station', state: '静岡県', city: '熱海市' }),
+        feature('熱海駅', { osm_value: 'station', state: '静岡県', city: '熱海市' }, [139.08, 35.11]),
+        feature('熱海駅', { osm_value: 'station', state: '福島県', city: '郡山市' }, [140.27, 37.48]),
+      ],
+    });
+  const out = await photonSuggest({ q: '熱海駅' }, fakeFetch);
+  assert.deepEqual(out, [
+    { name: '熱海駅', detail: '静岡県 熱海市', lat: 35.1, lng: 139.07 },
+    { name: '熱海駅', detail: '福島県 郡山市', lat: 37.48, lng: 140.27 },
+  ]);
+});
+
+test('API: 場所の候補は 2 文字未満なら問い合わせない。他のサイトからは 403', async () => {
+  const env = {};
+  const res = await worker.fetch(new Request('https://travel.example/api/places?q=箱'), env);
+  assert.deepEqual(await res.json(), { suggestions: [] });
+  const cross = await worker.fetch(
+    new Request('https://travel.example/api/places?q=箱根', { headers: { 'Sec-Fetch-Site': 'cross-site' } }),
+    env,
+  );
+  assert.equal(cross.status, 403);
+});
+
+test('場所の候補: 「〜駅」と打つと、駅名に「駅」が付かない OpenStreetMap の駅も先頭に出す', async () => {
+  const urls = [];
+  const fakeFetch = async (url) => {
+    urls.push(new URL(url));
+    const station = new URL(url).searchParams.getAll('osm_tag').length > 0;
+    return Response.json({
+      features: station
+        ? [{ geometry: { coordinates: [139.07, 35.1] }, properties: { name: '熱海', osm_key: 'railway', osm_value: 'station', state: '静岡県', city: '熱海市' } }]
+        : [{ geometry: { coordinates: [139.08, 35.1] }, properties: { name: '熱海駅前郵便局', osm_key: 'amenity', osm_value: 'post_office', state: '静岡県', city: '熱海市' } }],
+    });
+  };
+  const out = await photonSuggest({ q: '熱海駅' }, fakeFetch);
+  assert.deepEqual(out.map((o) => o.name), ['熱海駅', '熱海駅前郵便局']);
+  assert.equal(urls.find((u) => u.searchParams.has('osm_tag')).searchParams.get('q'), '熱海');
+});
+
+test('OpenStreetMap: 有料道路・高速道路を使わない条件を Valhalla に渡し、避けられなかった道を知らせる', async () => {
+  let sent;
+  const fakeFetch = async (url, init) => {
+    sent = { url, body: JSON.parse(init.body) };
+    return Response.json({
+      trip: { summary: { time: 7200.4, length: 108.1, has_toll: true, has_highway: false }, legs: [{ shape: 'abc' }] },
+    });
+  };
+  const plan = normalizePlan({
+    stops: [
+      { place: 'A', lat: 35.68, lng: 139.76, departAt: new Date(T0).toISOString() },
+      { place: 'B', lat: 35.1, lng: 139.08 },
+    ],
+    avoidTolls: true,
+    avoidHighways: true,
+  });
+  const r = await buildSchedule(plan, osmRouter(fakeFetch));
+  assert.match(sent.url, /valhalla/);
+  assert.deepEqual(sent.body.costing_options, { auto: { use_tolls: 0, use_highways: 0 } });
+  assert.deepEqual(sent.body.locations[0], { lat: 35.68, lon: 139.76 });
+  assert.equal(r.legs[0].durationSeconds, 7200);
+  assert.equal(r.legs[0].distanceMeters, 108100);
+  assert.equal(r.legs[0].polylinePrecision, 6);
+  assert.deepEqual(r.legs[0].unavoidable, ['toll'], '有料道路は避けられなかった。高速道路は避けられた');
+  assert.deepEqual(r.options, { avoidTolls: true, avoidHighways: true });
+
+  // 条件なしなら何も渡さず、警告も出さない
+  const plain = await buildSchedule({ ...plan, avoidTolls: false, avoidHighways: false }, osmRouter(fakeFetch));
+  assert.deepEqual(sent.body.costing_options, { auto: {} });
+  assert.deepEqual(plain.legs[0].unavoidable, []);
+});
+
+test('OpenStreetMap: 道が見つからないときは入力の問題として伝える', async () => {
+  const fakeFetch = async () => Response.json({ error_code: 442, error: 'No path could be found for input' }, { status: 400 });
+  await assert.rejects(
+    osmRouter(fakeFetch)({ place: '島', location: { lat: 1, lng: 1 } }, { place: '本土', location: { lat: 2, lng: 2 } }),
+    (err) => err instanceof InputError && /見つかりません/.test(err.message),
+  );
 });

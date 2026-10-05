@@ -136,6 +136,9 @@ body {
 .btn:disabled { opacity: .6; cursor: progress; }
 
 .error { color: var(--error); margin: 10px 0 0; font-weight: 600; }
+.status { color: #059669; margin: 10px 0 0; font-size: .9rem; }
+.conditions { margin: 8px 0 0; font-size: .85rem; color: var(--muted); }
+.tl-leg-warn { grid-column: 2; color: var(--warn); font-size: .82rem; }
 
 /* ---- 結果 ---- */
 
@@ -200,3 +203,28 @@ body {
   .panel:first-child, .links, .tl-link { display: none; }
   .layout { grid-template-columns: 1fr; }
 }
+
+/* ---- 場所の候補 ---- */
+
+.combo { position: relative; }
+.combo input { padding-right: 30px; }
+.place-check {
+  position: absolute; right: 9px; top: 50%; transform: translateY(-50%);
+  color: #059669; font-weight: 700; pointer-events: none;
+}
+.stop.is-selected .combo input { border-color: #059669; }
+
+.suggestions {
+  position: absolute; z-index: 1000; left: 0; right: 0; top: calc(100% + 2px);
+  margin: 0; padding: 4px 0; list-style: none;
+  max-height: 300px; overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, .15);
+}
+.suggestions [role=option] { display: grid; padding: 7px 12px; cursor: pointer; line-height: 1.35; }
+.suggestions [role=option]:hover, .suggestions [aria-selected=true] { background: var(--accent-soft); }
+.sugg-name { color: var(--text); font-weight: 600; }
+.sugg-detail { color: var(--muted); font-size: .8rem; }
+.sugg-empty { padding: 7px 12px; color: var(--muted); font-size: .85rem; }
