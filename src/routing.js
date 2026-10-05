@@ -35,10 +35,12 @@ const FIELD_MASK = [
   'routes.legs.endLocation',
 ].join(',');
 
-function googleWaypoint(place) {
-  const ll = parseLatLng(place);
+// 候補から選んだ地点は Place ID か座標、手で打った地点は文字（座標の形なら座標）で渡す
+function googleWaypoint(stop) {
+  if (stop.placeId) return { placeId: stop.placeId };
+  const ll = stop.location ?? parseLatLng(stop.place);
   if (ll) return { location: { latLng: { latitude: ll.lat, longitude: ll.lng } } };
-  return { address: place };
+  return { address: stop.place };
 }
 
 function seconds(duration) {
@@ -52,12 +54,12 @@ function fromGoogleLatLng(loc) {
 }
 
 export function googleRouter(apiKey, fetchImpl = fetch) {
-  return async function routeLeg(origin, destination, departureMs, { avoidTolls, avoidHighways } = {}, now = Date.now()) {
+  return async function routeLeg(from, to, departureMs, { avoidTolls, avoidHighways } = {}, now = Date.now()) {
     // 渋滞予測は未来の出発時刻でしか使えない（過去を指定するとエラーになる）
     const trafficAware = departureMs > now + 60 * 1000;
     const body = {
-      origin: googleWaypoint(origin),
-      destination: googleWaypoint(destination),
+      origin: googleWaypoint(from),
+      destination: googleWaypoint(to),
       travelMode: 'DRIVE',
       routingPreference: trafficAware ? 'TRAFFIC_AWARE' : 'TRAFFIC_UNAWARE',
       languageCode: 'ja',
@@ -75,11 +77,11 @@ export function googleRouter(apiKey, fetchImpl = fetch) {
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       console.error('[routes api]', res.status, JSON.stringify(data?.error ?? data));
-      if (res.status === 400) throw new InputError(`「${origin}」→「${destination}」のルートを検索できませんでした。地点を見直してください`);
+      if (res.status === 400) throw new InputError(`「${from.place}」→「${to.place}」のルートを検索できませんでした。地点を候補から選び直してください`);
       throw new RoutingError('ルート検索サービスでエラーが発生しました');
     }
     const route = data.routes?.[0];
-    if (!route) throw new InputError(`「${origin}」→「${destination}」の車のルートが見つかりませんでした`);
+    if (!route) throw new InputError(`「${from.place}」→「${to.place}」の車のルートが見つかりませんでした`);
     const leg = route.legs?.[0] ?? {};
     return {
       durationSeconds: seconds(route.duration),
@@ -100,29 +102,29 @@ const USER_AGENT = 'travel-master/0.1 (route planner)';
 export function osmRouter(fetchImpl = fetch) {
   const cache = new Map();
 
-  async function geocode(place) {
-    const ll = parseLatLng(place);
+  async function geocode({ place, location }) {
+    const ll = location ?? parseLatLng(place);
     if (ll) return ll;
     if (cache.has(place)) return cache.get(place);
     const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&accept-language=ja&q=${encodeURIComponent(place)}`;
     const res = await fetchImpl(url, { headers: { 'User-Agent': USER_AGENT, Accept: 'application/json' } });
     if (!res.ok) throw new RoutingError('住所の検索サービスでエラーが発生しました');
     const [hit] = await res.json();
-    if (!hit) throw new InputError(`「${place}」が見つかりませんでした。住所や座標（35.68, 139.76）で入力してください`);
+    if (!hit) throw new InputError(`「${place}」が見つかりませんでした。入力中に出る候補から選んでください`);
     const result = { lat: Number(hit.lat), lng: Number(hit.lon) };
     cache.set(place, result);
     return result;
   }
 
-  return async function routeLeg(origin, destination) {
-    const a = await geocode(origin);
-    const b = await geocode(destination);
+  return async function routeLeg(from, to) {
+    const a = await geocode(from);
+    const b = await geocode(to);
     const url = `https://router.project-osrm.org/route/v1/driving/${a.lng},${a.lat};${b.lng},${b.lat}?overview=full&geometries=polyline`;
     const res = await fetchImpl(url, { headers: { 'User-Agent': USER_AGENT } });
     const data = await res.json().catch(() => ({}));
     if (!res.ok && data?.code !== 'NoRoute') throw new RoutingError('ルート検索サービスでエラーが発生しました');
     const route = data.routes?.[0];
-    if (!route) throw new InputError(`「${origin}」→「${destination}」の車のルートが見つかりませんでした`);
+    if (!route) throw new InputError(`「${from.place}」→「${to.place}」の車のルートが見つかりませんでした`);
     return {
       durationSeconds: Math.round(route.duration),
       distanceMeters: Math.round(route.distance),

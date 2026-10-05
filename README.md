@@ -5,6 +5,7 @@
 ## ページ 1: ドライブ旅程プランナー（`/`）
 
 - 出発地と出発日時、目的地（いくつでも、既定で 10 か所まで）を入力する
+- 場所は **2 文字以上打つと候補が出る**（「熱海駅」「江ノ島」など）。選ぶと ✓ が付き、その地点の位置が確定する（同じ名前の別の場所と取り違えない）
 - 目的地ごとに **滞在時間** と、任意で **出発時刻** を指定できる
   - 出発時刻が空欄 → 到着 + 滞在時間で出発
   - 出発時刻を指定 → その時刻まで待って出発（待ち時間を表示）。滞在を終えても間に合わないときは警告し、遅れた時刻で以降を計算する
@@ -18,19 +19,23 @@
 
 ### ルート検索の仕組み
 
-| `GOOGLE_MAPS_API_KEY` | ルート検索 | 渋滞 | 備考 |
+| `GOOGLE_MAPS_API_KEY` | 場所の候補 | ルート検索 | 渋滞 |
 |---|---|---|---|
-| あり（推奨） | Google Routes API（Worker から呼ぶので、キーはブラウザに出ない） | 未来の出発なら考慮 | 住所・施設名の解決が正確 |
-| なし | OpenStreetMap（Nominatim + OSRM の公開デモサーバー） | 考慮しない | お試し・開発用。同じ名前の別の場所になることがある（例: 「熱海駅」が福島県の熱海駅になる） |
+| あり（推奨） | Google Places API (New) Autocomplete。選んだ候補の Place ID をそのままルート検索に使う | Google Routes API | 未来の出発なら考慮 |
+| なし | Photon（OpenStreetMap）。選んだ候補の座標を使う | OSRM の公開デモサーバー | 考慮しない |
+
+Google の API は Worker から呼ぶので、キーはブラウザに出ません。キーなしはお試し・開発用で、施設の情報は Google より少なめです。
+候補から選ばずに文字のまま計算することもできますが、その場合は同じ名前の別の場所になることがあります（例: キーなしで「熱海駅」が福島県の熱海駅になる）。
 
 地図の表示は Leaflet + OpenStreetMap のタイル（キー不要・無料）です。
 
 ## 構成
 
 ```
-src/worker.js     Worker のエントリポイント（/api/route, /api/config。それ以外は static/ を返す）
+src/worker.js     Worker のエントリポイント（/api/route, /api/places, /api/config。それ以外は static/ を返す）
 src/schedule.js   旅程の計算（到着・待ち・出発）と入力の検証
 src/routing.js    ルート検索（Google Routes API / OpenStreetMap）
+src/places.js     場所の候補（Google Places API / Photon）
 static/           画面（index.html, app.js, style.css）
 test/             単体テスト（node --test）
 ```
