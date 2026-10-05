@@ -96,7 +96,13 @@ export async function buildSchedule(plan, routeLeg) {
       durationSeconds: leg.durationSeconds,
       distanceMeters: leg.distanceMeters,
       polyline: leg.polyline,
+      polylinePrecision: leg.polylinePrecision ?? 5,
       trafficAware: Boolean(leg.trafficAware),
+      // 「使わない」を指定したのに通らざるを得なかった道（OpenStreetMap のときだけ分かる）
+      unavoidable: [
+        plan.avoidTolls && leg.hasToll ? 'toll' : null,
+        plan.avoidHighways && leg.hasHighway ? 'highway' : null,
+      ].filter(Boolean),
     });
     if (i === 1) result[0].location = leg.start ?? stops[0].location;
 
@@ -115,6 +121,7 @@ export async function buildSchedule(plan, routeLeg) {
   const first = result[0].departure;
   const last = result[result.length - 1].departure;
   return {
+    options,
     stops: result,
     legs,
     totals: {

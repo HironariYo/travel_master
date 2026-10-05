@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { googleSuggest, photonSuggest } from '../src/places.js';
-import { googleRouter, parseLatLng } from '../src/routing.js';
+import { googleRouter, osmRouter, parseLatLng } from '../src/routing.js';
 import { buildSchedule, InputError, normalizePlan } from '../src/schedule.js';
 import worker from '../src/worker.js';
 
@@ -240,4 +240,44 @@ test('場所の候補: 「〜駅」と打つと、駅名に「駅」が付かな
   const out = await photonSuggest({ q: '熱海駅' }, fakeFetch);
   assert.deepEqual(out.map((o) => o.name), ['熱海駅', '熱海駅前郵便局']);
   assert.equal(urls.find((u) => u.searchParams.has('osm_tag')).searchParams.get('q'), '熱海');
+});
+
+test('OpenStreetMap: 有料道路・高速道路を使わない条件を Valhalla に渡し、避けられなかった道を知らせる', async () => {
+  let sent;
+  const fakeFetch = async (url, init) => {
+    sent = { url, body: JSON.parse(init.body) };
+    return Response.json({
+      trip: { summary: { time: 7200.4, length: 108.1, has_toll: true, has_highway: false }, legs: [{ shape: 'abc' }] },
+    });
+  };
+  const plan = normalizePlan({
+    stops: [
+      { place: 'A', lat: 35.68, lng: 139.76, departAt: new Date(T0).toISOString() },
+      { place: 'B', lat: 35.1, lng: 139.08 },
+    ],
+    avoidTolls: true,
+    avoidHighways: true,
+  });
+  const r = await buildSchedule(plan, osmRouter(fakeFetch));
+  assert.match(sent.url, /valhalla/);
+  assert.deepEqual(sent.body.costing_options, { auto: { use_tolls: 0, use_highways: 0 } });
+  assert.deepEqual(sent.body.locations[0], { lat: 35.68, lon: 139.76 });
+  assert.equal(r.legs[0].durationSeconds, 7200);
+  assert.equal(r.legs[0].distanceMeters, 108100);
+  assert.equal(r.legs[0].polylinePrecision, 6);
+  assert.deepEqual(r.legs[0].unavoidable, ['toll'], '有料道路は避けられなかった。高速道路は避けられた');
+  assert.deepEqual(r.options, { avoidTolls: true, avoidHighways: true });
+
+  // 条件なしなら何も渡さず、警告も出さない
+  const plain = await buildSchedule({ ...plan, avoidTolls: false, avoidHighways: false }, osmRouter(fakeFetch));
+  assert.deepEqual(sent.body.costing_options, { auto: {} });
+  assert.deepEqual(plain.legs[0].unavoidable, []);
+});
+
+test('OpenStreetMap: 道が見つからないときは入力の問題として伝える', async () => {
+  const fakeFetch = async () => Response.json({ error_code: 442, error: 'No path could be found for input' }, { status: 400 });
+  await assert.rejects(
+    osmRouter(fakeFetch)({ place: '島', location: { lat: 1, lng: 1 } }, { place: '本土', location: { lat: 2, lng: 2 } }),
+    (err) => err instanceof InputError && /見つかりません/.test(err.message),
+  );
 });

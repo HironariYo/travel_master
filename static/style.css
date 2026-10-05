@@ -136,6 +136,9 @@ body {
 .btn:disabled { opacity: .6; cursor: progress; }
 
 .error { color: var(--error); margin: 10px 0 0; font-weight: 600; }
+.status { color: #059669; margin: 10px 0 0; font-size: .9rem; }
+.conditions { margin: 8px 0 0; font-size: .85rem; color: var(--muted); }
+.tl-leg-warn { grid-column: 2; color: var(--warn); font-size: .82rem; }
 
 /* ---- 結果 ---- */
 

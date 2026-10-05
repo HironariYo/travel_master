@@ -83,7 +83,11 @@ $('#reset').addEventListener('click', () => {
   save();
 });
 
-form.addEventListener('input', save);
+form.addEventListener('input', () => {
+  save();
+  // 結果を出したあとに入力を変えたら、まだ反映されていないことを知らせる
+  if (!$('#summary').hidden) showStatus('入力が変わりました。「ルートとスケジュールを計算」を押すと反映されます');
+});
 
 function readForm() {
   return {
@@ -342,8 +346,9 @@ if (map) {
 }
 const routeLayer = map ? L.featureGroup().addTo(map) : null;
 
-// Google / OSRM の encoded polyline（精度 1e5）を座標の配列にする
-function decodePolyline(str) {
+// encoded polyline を座標の配列にする。精度は Google が 1e5、Valhalla（OpenStreetMap）が 1e6
+function decodePolyline(str, precision = 5) {
+  const factor = 10 ** precision;
   const points = [];
   let index = 0;
   let lat = 0;
@@ -362,7 +367,7 @@ function decodePolyline(str) {
       if (axis === 0) lat += delta;
       else lng += delta;
     }
-    points.push([lat / 1e5, lng / 1e5]);
+    points.push([lat / factor, lng / factor]);
   }
   return points;
 }
@@ -376,7 +381,7 @@ function drawMap(result) {
   routeLayer.clearLayers();
   result.legs.forEach((leg, i) => {
     if (!leg.polyline) return;
-    L.polyline(decodePolyline(leg.polyline), { color: LEG_COLORS[i % LEG_COLORS.length], weight: 5, opacity: 0.85 })
+    L.polyline(decodePolyline(leg.polyline, leg.polylinePrecision), { color: LEG_COLORS[i % LEG_COLORS.length], weight: 5, opacity: 0.85 })
       .bindTooltip(`${leg.from === 0 ? '出発地' : `目的地 ${leg.from}`} → 目的地 ${leg.to}：${formatDuration(leg.durationSeconds)}`)
       .addTo(routeLayer);
   });
@@ -473,9 +478,19 @@ function renderSummary(result) {
       <div><dt>運転</dt><dd>${formatDuration(t.driveSeconds)}</dd></div>
       <div><dt>距離</dt><dd>${formatDistance(t.distanceMeters)}</dd></div>
       <div><dt>滞在・待ち</dt><dd>${formatDuration((t.stayMinutes + t.waitMinutes) * 60)}</dd></div>
-    </dl>`;
+    </dl>
+    <p class="conditions">ルートの条件: ${conditionText(result.options)}</p>`;
   el.hidden = false;
 }
+
+function conditionText(options = {}) {
+  const parts = [];
+  if (options.avoidTolls) parts.push('有料道路を使わない');
+  if (options.avoidHighways) parts.push('高速道路を使わない');
+  return parts.length ? parts.join('・') : '指定なし（有料道路・高速道路も使う）';
+}
+
+const UNAVOIDABLE = { toll: '有料道路', highway: '高速道路' };
 
 function renderLinks(result) {
   const el = $('#links');
@@ -530,6 +545,7 @@ function renderTimeline(result) {
       li.innerHTML = `
         <span class="tl-leg-line" aria-hidden="true"></span>
         <span class="tl-leg-text">🚗 ${formatDuration(leg.durationSeconds)}・${formatDistance(leg.distanceMeters)}${leg.trafficAware ? '<span class="tag">渋滞予測</span>' : ''}</span>
+        ${leg.unavoidable?.length ? `<span class="tl-leg-warn">⚠ この区間は${leg.unavoidable.map((k) => UNAVOIDABLE[k]).join('・')}を通らないと行けません</span>` : ''}
         <a href="${escapeHtml(googleMapsUrl(legStops))}" target="_blank" rel="noopener" class="tl-link">この区間を Google マップで</a>`;
       el.append(li);
     }
@@ -574,6 +590,13 @@ function clearResults() {
   $('#links').hidden = true;
   $('#empty').hidden = false;
   showError('');
+  showStatus('');
+}
+
+function showStatus(message) {
+  const el = $('#status');
+  el.textContent = message;
+  el.hidden = !message;
 }
 
 function showError(message) {
@@ -599,6 +622,7 @@ form.addEventListener('submit', async (e) => {
   };
 
   const btn = $('#submit');
+  showStatus('');
   btn.disabled = true;
   btn.textContent = '計算中…';
   try {
@@ -617,6 +641,7 @@ form.addEventListener('submit', async (e) => {
     renderSummary(data);
     renderLinks(data);
     renderTimeline(data);
+    showStatus(`計算しました（${formatTime(Date.now())}・${conditionText(data.options)}）`);
     if (window.matchMedia('(max-width: 900px)').matches) $('#result-title').scrollIntoView({ behavior: 'smooth' });
   } catch (err) {
     showError(err.message || '通信に失敗しました');
