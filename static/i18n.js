@@ -11,6 +11,10 @@ export const LANGS = [
 const STORAGE_KEY = 'travel-master:lang';
 
 const ja = {
+  offDayDetail: ({ kind, days, hours, limit }) =>
+    `${kind}・今日は${days}のためメーター対象外（料金・時間制限なし。ふだんは${hours}・最大${limit}分）`,
+  offDayNewYear: '1月1日〜3日',
+  warnCheckSigns: 'メーターが動いていない日です。駐車禁止の標識・表示がある場所には停められないので、現地で必ず確かめてください',
   sep: '・',
   title: 'ドライブ旅程プランナー',
   lead: '目的地と出発時刻・滞在時間を入れると、車のルートと全体のスケジュールを計算します。',
@@ -128,6 +132,10 @@ const ja = {
 };
 
 const en = {
+  offDayDetail: ({ kind, days, hours, limit }) =>
+    `${kind} · meters are off today (${days}): no fee and no time limit (normally ${hours}, max ${limit} min)`,
+  offDayNewYear: 'Jan 1–3',
+  warnCheckSigns: 'Meters are off today. You cannot park where no-parking signs or markings apply, so always check on site',
   sep: ' · ',
   title: 'Drive Itinerary Planner',
   lead: 'Enter your destinations, departure times and how long you will stay, and get the driving route and a full schedule.',
@@ -245,6 +253,10 @@ const en = {
 };
 
 const ko = {
+  offDayDetail: ({ kind, days, hours, limit }) =>
+    `${kind} · 오늘은 ${days}이라 미터 대상 외 (요금·시간 제한 없음. 평소에는 ${hours} · 최대 ${limit}분)`,
+  offDayNewYear: '1월 1일~3일',
+  warnCheckSigns: '미터가 작동하지 않는 날입니다. 주차 금지 표지·표시가 있는 곳에는 세울 수 없으니 현지에서 반드시 확인해 주세요',
   sep: ' · ',
   title: '드라이브 일정 플래너',
   lead: '목적지와 출발 시각, 체류 시간을 입력하면 자동차 경로와 전체 일정을 계산합니다.',

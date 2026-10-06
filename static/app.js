@@ -640,6 +640,12 @@ const zoneHours = (z) => t('hours', { from: z.from, to: z.to });
 
 function parkingDetail(p) {
   const z = p.zone;
+  const kind = t(z.kind === 'ticket' ? 'ticket' : 'meter');
+  if (p.offDay) {
+    // メーターが止まる日（日曜・休日など）。料金・最大時間はかからない
+    const days = p.offReason?.code === 'newYear' ? t('offDayNewYear') : t(CLOSED_KEYS[p.offReason?.closed]);
+    return t('offDayDetail', { kind, days, hours: zoneHours(z), limit: z.limitMinutes });
+  }
   return t('parkingDetail', {
     kind: t(z.kind === 'ticket' ? 'ticket' : 'meter'),
     hours: zoneHours(z),
@@ -670,6 +676,7 @@ function parkingWarnings(p) {
       if (w === 'overHours') return t('warnOverHours', { hours: zoneHours(z) });
       if (w === 'unavailableAtArrival') return t('warnUnavailableAtArrival', { reason: reasonText(p.arrivalReason) });
       if (w === 'holidayUnknown') return t('warnHolidayUnknown');
+      if (w === 'checkSigns') return t('warnCheckSigns');
       return null;
     })
     .filter(Boolean);
