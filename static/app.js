@@ -663,7 +663,10 @@ function parkingWarnings(p) {
   const z = p.zone;
   return p.warnings
     .map((w) => {
-      if (w === 'overLimit') return t('warnOverLimit', { minutes: p.parkMinutes, limit: z.limitMinutes });
+      if (w === 'overLimit') {
+        // 滞在の上限は最大時間だけで見る（利用時間の終わりは overHours で別に知らせる）
+        return t('warnOverLimit', { minutes: p.parkMinutes, limit: z.limitMinutes, maxStay: Math.max(0, z.limitMinutes - p.walkMinutes * 2) });
+      }
       if (w === 'overHours') return t('warnOverHours', { hours: zoneHours(z) });
       if (w === 'unavailableAtArrival') return t('warnUnavailableAtArrival', { reason: reasonText(p.arrivalReason) });
       if (w === 'holidayUnknown') return t('warnHolidayUnknown');

@@ -101,6 +101,8 @@ function stayWarnings(zone, status, parkMinutes) {
 function describe(zone, near, status, stayMinutes) {
   const walkMinutes = walkMinutesFor(near.distance);
   const parkMinutes = stayMinutes + walkMinutes * 2;
+  // 停めておける時間（最大時間と、利用時間の終わりまでの短いほう）から、徒歩の往復を引いた滞在時間の上限
+  const allowedMinutes = Math.min(zone.limit, zone.to - status.minutes);
   return {
     status: 'ok',
     zone: zoneSummary(zone),
@@ -108,12 +110,18 @@ function describe(zone, near, status, stayMinutes) {
     distanceMeters: Math.round(near.distance),
     walkMinutes,
     parkMinutes,
+    maxStayMinutes: Math.max(0, allowedMinutes - walkMinutes * 2),
+    overMinutes: Math.max(0, parkMinutes - allowedMinutes),
     warnings: stayWarnings(zone, status, parkMinutes),
   };
 }
 
+// 収まらない 1 分を何 m の遠回りと同じに見るか
+const METERS_PER_OVER_MINUTE = 30;
+
 // target の近く（radius m 以内）で、arrivalMs に使える区間を選ぶ
-// 最大時間・利用時間に収まる区間を優先し（300 m までの遠回りなら）、なければいちばん近い区間
+// 最大時間・利用時間に収まる区間を優先する。収まる区間がなければ、超える時間がいちばん短い区間
+// （距離 + 超える分数 × 30 m がいちばん小さい区間。60 分の区間で 4 分超えるほうが、20 分の区間で 44 分超えるより良い）
 export function findParking(data, target, arrivalMs, stayMinutes, { radius = DEFAULT_RADIUS } = {}) {
   const nearby = [];
   for (const zone of data.zones) {
@@ -128,7 +136,7 @@ export function findParking(data, target, arrivalMs, stayMinutes, { radius = DEF
     const status = zoneStatus(zone, arrivalMs, data);
     if (!status.ok) continue;
     const result = describe(zone, near, status, stayMinutes);
-    const penalty = result.warnings.some((w) => w === 'overLimit' || w === 'overHours') ? 300 : 0;
+    const penalty = result.overMinutes > 0 ? 300 + result.overMinutes * METERS_PER_OVER_MINUTE : 0;
     const score = near.distance + penalty;
     if (!best || score < best.score) best = { score, result };
   }

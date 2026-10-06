@@ -119,7 +119,9 @@ const ja = {
   reasonClosed: ({ days }) => `${days}は対象外`,
   reasonOutsideHours: ({ hours }) => `利用時間外（${hours}）`,
   reasonNoLocation: '目的地の位置が分かりませんでした',
-  warnOverLimit: ({ minutes, limit }) => `停めておく時間（滞在＋徒歩往復＋待ち＝${minutes}分）が最大${limit}分を超えます。延長はできません`,
+  warnOverLimit: ({ minutes, limit, maxStay }) =>
+    `停めておく時間（滞在＋徒歩往復＋待ち＝${minutes}分）が最大${limit}分を超えます（延長はできません）。` +
+    (maxStay > 0 ? `滞在を${maxStay}分以内にすると収まります` : '滞在が短くても収まりません'),
   warnOverHours: ({ hours }) => `利用時間（${hours}）の終わりを過ぎます。過ぎた後は現地の標識に従ってください`,
   warnUnavailableAtArrival: ({ reason }) => `到着時刻には使えません（${reason}）`,
   warnHolidayUnknown: '祝日データの範囲外の日付です。祝日かどうかは確かめてください',
@@ -234,8 +236,9 @@ const en = {
   reasonClosed: ({ days }) => `not available on ${days}`,
   reasonOutsideHours: ({ hours }) => `outside operating hours (${hours})`,
   reasonNoLocation: "couldn't locate the destination",
-  warnOverLimit: ({ minutes, limit }) =>
-    `You would be parked ${minutes} min (stay + walking + waiting), over the ${limit} min limit. Extensions are not allowed`,
+  warnOverLimit: ({ minutes, limit, maxStay }) =>
+    `You would be parked ${minutes} min (stay + walking + waiting), over the ${limit} min limit (no extensions). ` +
+    (maxStay > 0 ? `Stay ${maxStay} min or less to fit` : 'It does not fit even with a short stay'),
   warnOverHours: ({ hours }) => `You will still be parked after the operating hours (${hours}) end. After that, follow the signs on site`,
   warnUnavailableAtArrival: ({ reason }) => `Not usable at your arrival time (${reason})`,
   warnHolidayUnknown: 'This date is beyond the holiday data. Please check whether it is a public holiday',
@@ -350,7 +353,9 @@ const ko = {
   reasonClosed: ({ days }) => `${days}은 이용 불가`,
   reasonOutsideHours: ({ hours }) => `이용 시간 외 (${hours})`,
   reasonNoLocation: '목적지의 위치를 알 수 없었습니다',
-  warnOverLimit: ({ minutes, limit }) => `세워 두는 시간 (체류+도보 왕복+대기=${minutes}분)이 최대 ${limit}분을 넘습니다. 연장할 수 없습니다`,
+  warnOverLimit: ({ minutes, limit, maxStay }) =>
+    `세워 두는 시간 (체류+도보 왕복+대기=${minutes}분)이 최대 ${limit}분을 넘습니다 (연장 불가). ` +
+    (maxStay > 0 ? `체류를 ${maxStay}분 이내로 하면 맞습니다` : '체류를 줄여도 맞지 않습니다'),
   warnOverHours: ({ hours }) => `이용 시간 (${hours})이 끝난 뒤에도 세워 두게 됩니다. 그 후에는 현지 표지판을 따라 주세요`,
   warnUnavailableAtArrival: ({ reason }) => `도착 시각에는 이용할 수 없습니다 (${reason})`,
   warnHolidayUnknown: '공휴일 데이터 범위 밖의 날짜입니다. 공휴일인지 확인해 주세요',

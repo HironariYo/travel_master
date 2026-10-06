@@ -136,3 +136,14 @@ test('実データ: 東京駅の近くで平日は見つかり、元日は見つ
   const newYear = findParking(realData, tokyoStation, at('2027-01-01T10:00:00'), 30);
   assert.equal(newYear.status, 'unavailable');
 });
+
+test('どの区間にも収まらないときは、超える時間がいちばん短い区間を選ぶ', () => {
+  const short = zone({ id: 1, closed: 'none', limit: 20 }); // 111 m、最大 20 分
+  const long = zone({ id: 2, closed: 'none', lines: [[139.7, 35.7015, 139.702, 35.7015]] }); // 166 m、最大 60 分
+  const d = data([short, long]);
+  const r = findParking(d, target, at('2026-10-18T11:00:00'), 60);
+  assert.equal(r.zone.id, 2, '60 分の区間で数分超えるほうが、20 分の区間で 40 分以上超えるより良い');
+  assert.deepEqual(r.warnings, ['overLimit']);
+  assert.equal(r.maxStayMinutes, 54, '最大 60 分 − 徒歩往復 6 分');
+  assert.equal(r.overMinutes, 6);
+});
