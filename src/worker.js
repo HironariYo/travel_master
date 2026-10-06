@@ -1,6 +1,7 @@
 // Cloudflare Workers のエントリポイント
 // 画面（static/）は Static Assets がそのまま返す。Worker が受け持つのは /api/* だけ
 import parkingData from './data/tokyo-parking.json' with { type: 'json' };
+import { message, normalizeLang } from './messages.js';
 import { findParking, recheckParking } from './parking.js';
 import { googleSuggest, photonSuggest } from './places.js';
 import { googleRouter, osmRouter, RoutingError } from './routing.js';
@@ -30,27 +31,29 @@ export async function handleRoute(request, env) {
   try {
     body = await request.json();
   } catch {
-    return json({ error: 'JSON の形式が正しくありません' }, 400);
+    return json({ error: message('ja', 'badJson') }, 400);
   }
+  const lang = normalizeLang(body?.lang);
 
   try {
     const plan = normalizePlan(body, { maxStops: Number(env.MAX_STOPS) || 10 });
     const provider = env.GOOGLE_MAPS_API_KEY ? 'google' : 'osm';
-    const routeLeg = provider === 'google' ? googleRouter(env.GOOGLE_MAPS_API_KEY) : osmRouter();
+    const routeLeg = provider === 'google' ? googleRouter(env.GOOGLE_MAPS_API_KEY, fetch, { lang }) : osmRouter();
     const parking = {
       find: (target, arrival, stay) => findParking(parkingData, target, arrival, stay),
       recheck: (found, arrival, stay) => recheckParking(parkingData, found, arrival, stay),
     };
     const schedule = await buildSchedule(plan, routeLeg, { parking });
     if (schedule.stops.some((s) => s.parking)) {
-      schedule.parkingSource = { text: parkingData.source, url: parkingData.sourceUrl, dataDate: parkingData.dataDate };
+      // 出典の文言は画面で各言語にする（CC BY 4.0）
+      schedule.parkingSource = { url: parkingData.sourceUrl, dataDate: parkingData.dataDate };
     }
     return json({ provider, ...schedule });
   } catch (err) {
-    if (err instanceof InputError) return json({ error: err.message }, 400);
-    if (err instanceof RoutingError) return json({ error: err.message }, err.status);
+    if (err instanceof InputError) return json({ error: message(lang, err.key, err.params) }, 400);
+    if (err instanceof RoutingError) return json({ error: message(lang, err.key, err.params) }, err.status);
     console.error('[route]', err);
-    return json({ error: 'エラーが発生しました' }, 500);
+    return json({ error: message(lang, 'unknownError') }, 500);
   }
 }
 
@@ -59,6 +62,7 @@ export async function handlePlaces(request, env) {
   if (request.method !== 'GET') return json({ error: 'Method Not Allowed' }, 405);
   if (isCrossSite(request)) return json({ error: 'Forbidden' }, 403);
   const params = new URL(request.url).searchParams;
+  const lang = normalizeLang(params.get('lang'));
   const q = (params.get('q') ?? '').trim().slice(0, 100);
   if (q.length < 2) return json({ suggestions: [] });
   const lat = Number(params.get('lat'));
@@ -69,13 +73,13 @@ export async function handlePlaces(request, env) {
   const sessionToken = session && /^[A-Za-z0-9-]{1,64}$/.test(session) ? session : undefined;
   try {
     const suggestions = env.GOOGLE_MAPS_API_KEY
-      ? await googleSuggest(env.GOOGLE_MAPS_API_KEY, { q, near, sessionToken })
-      : await photonSuggest({ q, near });
+      ? await googleSuggest(env.GOOGLE_MAPS_API_KEY, { q, near, sessionToken, lang })
+      : await photonSuggest({ q, near, lang });
     return json({ suggestions });
   } catch (err) {
-    if (err instanceof RoutingError) return json({ error: err.message }, err.status);
+    if (err instanceof RoutingError) return json({ error: message(lang, err.key, err.params) }, err.status);
     console.error('[places]', err);
-    return json({ error: 'エラーが発生しました' }, 500);
+    return json({ error: message(lang, 'unknownError') }, 500);
   }
 }
 

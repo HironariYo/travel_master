@@ -10,28 +10,36 @@
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
+  <!-- 文言は static/i18n.js で日本語・英語・韓国語に切り替える（data-i18n など）。ここに書いてあるのは日本語の初期表示 -->
   <header class="site-header">
-    <h1>ドライブ旅程プランナー</h1>
-    <p class="lead">目的地と出発時刻・滞在時間を入れると、車のルートと全体のスケジュールを計算します。</p>
+    <div class="header-row">
+      <h1 data-i18n="title">ドライブ旅程プランナー</h1>
+      <label class="lang-switch">
+        <span class="visually-hidden" data-i18n="language">言語</span>
+        <span aria-hidden="true">🌐</span>
+        <select id="lang"></select>
+      </label>
+    </div>
+    <p class="lead" data-i18n="lead">目的地と出発時刻・滞在時間を入れると、車のルートと全体のスケジュールを計算します。</p>
   </header>
 
   <main class="layout">
     <section class="panel" aria-labelledby="plan-title">
-      <h2 id="plan-title">行き先</h2>
+      <h2 id="plan-title" data-i18n="planTitle">行き先</h2>
       <form id="plan-form" novalidate>
         <ol id="stops" class="stops"></ol>
         <div class="row-actions">
-          <button type="button" id="add-stop" class="btn btn-ghost">＋ 目的地を追加</button>
+          <button type="button" id="add-stop" class="btn btn-ghost" data-i18n="addStop">＋ 目的地を追加</button>
         </div>
 
         <fieldset class="options">
-          <legend>ルートの条件（全区間まとめて）</legend>
-          <label><input type="checkbox" name="avoidTolls"> 有料道路を使わない</label>
-          <label><input type="checkbox" name="avoidHighways"> 高速道路を使わない</label>
-          <p class="options-note">区間ごとに変えるときは、各目的地の「ここまでの道」で選んでください。</p>
+          <legend data-i18n="optionsLegend">ルートの条件（全区間まとめて）</legend>
+          <label><input type="checkbox" name="avoidTolls"> <span data-i18n="avoidTolls">有料道路を使わない</span></label>
+          <label><input type="checkbox" name="avoidHighways"> <span data-i18n="avoidHighways">高速道路を使わない</span></label>
+          <p class="options-note" data-i18n="optionsNote">区間ごとに変えるときは、各目的地の「ここまでの道」で選んでください。</p>
         </fieldset>
 
-        <p class="hint">
+        <p class="hint" data-i18n-html="hint">
           時刻はすべて日本時間です。「出発時刻」は空欄でもかまいません。空欄なら到着後、滞在時間だけ過ごしてから出発します。
           指定した場合は、その時刻まで待ってから出発します（間に合わないときは警告します）。
           場所は 2 文字以上打つと候補が出るので、そこから選んでください（✓ が付きます）。
@@ -39,8 +47,8 @@
         </p>
 
         <div class="submit-row">
-          <button type="submit" class="btn btn-primary" id="submit">ルートとスケジュールを計算</button>
-          <button type="button" class="btn btn-ghost" id="reset">クリア</button>
+          <button type="submit" class="btn btn-primary" id="submit" data-i18n="submit">ルートとスケジュールを計算</button>
+          <button type="button" class="btn btn-ghost" id="reset" data-i18n="reset">クリア</button>
         </div>
         <p id="error" class="error" role="alert" hidden></p>
         <p id="status" class="status" role="status" hidden></p>
@@ -49,15 +57,15 @@
 
     <section class="panel results" aria-labelledby="result-title">
       <div class="results-head">
-        <h2 id="result-title">ルートとスケジュール</h2>
+        <h2 id="result-title" data-i18n="resultTitle">ルートとスケジュール</h2>
         <span id="provider" class="badge" hidden></span>
       </div>
-      <div id="map" class="map" role="region" aria-label="ルートの地図"></div>
+      <div id="map" class="map" role="region" aria-label="ルートの地図" data-i18n-attr="aria-label:mapRegion"></div>
       <div id="summary" class="summary" hidden></div>
       <div id="links" class="links" hidden></div>
       <ol id="timeline" class="timeline"></ol>
       <p id="source" class="source" hidden></p>
-      <p id="empty" class="empty">出発地と目的地を入力して「計算」を押すと、ここにルートと時刻表が表示されます。</p>
+      <p id="empty" class="empty" data-i18n="empty">出発地と目的地を入力して「計算」を押すと、ここにルートと時刻表が表示されます。</p>
     </section>
   </main>
 
@@ -66,23 +74,23 @@
       <div class="stop-head">
         <span class="stop-label"></span>
         <div class="stop-tools">
-          <button type="button" class="icon-btn" data-action="up" aria-label="上へ">↑</button>
-          <button type="button" class="icon-btn" data-action="down" aria-label="下へ">↓</button>
-          <button type="button" class="icon-btn" data-action="remove" aria-label="削除">✕</button>
+          <button type="button" class="icon-btn" data-action="up" aria-label="上へ" data-i18n-attr="aria-label:moveUp">↑</button>
+          <button type="button" class="icon-btn" data-action="down" aria-label="下へ" data-i18n-attr="aria-label:moveDown">↓</button>
+          <button type="button" class="icon-btn" data-action="remove" aria-label="削除" data-i18n-attr="aria-label:remove">✕</button>
         </div>
       </div>
       <div class="field field-place">
-        <label class="place-label">場所</label>
+        <label class="place-label" data-i18n="place">場所</label>
         <div class="combo">
           <input type="text" name="place" autocomplete="off" placeholder="例: 東京駅、箱根、江ノ島" role="combobox"
-                 aria-autocomplete="list" aria-expanded="false">
-          <span class="place-check" title="候補から選んだ場所" hidden>✓</span>
+                 aria-autocomplete="list" aria-expanded="false" data-i18n-attr="placeholder:placePlaceholder">
+          <span class="place-check" title="候補から選んだ場所" data-i18n-attr="title:placeChecked" hidden>✓</span>
           <ul class="suggestions" role="listbox" hidden></ul>
         </div>
       </div>
       <div class="field-row">
         <label class="field field-stay">
-          <span>滞在時間（分）</span>
+          <span data-i18n="stayMinutes">滞在時間（分）</span>
           <input type="number" name="stayMinutes" min="0" step="5" inputmode="numeric" value="60">
         </label>
         <label class="field field-depart">
@@ -91,13 +99,13 @@
         </label>
       </div>
       <div class="leg-options" role="group">
-        <span class="leg-options-label">ここまでの道</span>
-        <label><input type="checkbox" name="legAvoidTolls"> 有料道路を使わない</label>
-        <label><input type="checkbox" name="legAvoidHighways"> 高速道路を使わない</label>
+        <span class="leg-options-label" data-i18n="legOptions">ここまでの道</span>
+        <label><input type="checkbox" name="legAvoidTolls"> <span data-i18n="avoidTolls">有料道路を使わない</span></label>
+        <label><input type="checkbox" name="legAvoidHighways"> <span data-i18n="avoidHighways">高速道路を使わない</span></label>
       </div>
       <label class="parking-option">
         <input type="checkbox" name="parking">
-        <span>🅿 近くの路上パーキング（パーキング・メーター等）に停めて歩く<small>東京都内のみ。目的地から 1 km 以内で、到着時刻の曜日・祝日・利用時間に使える区間を選びます</small></span>
+        <span><span data-i18n="parkingOption">🅿 近くの路上パーキング（パーキング・メーター等）に停めて歩く</span><small data-i18n="parkingOptionNote">東京都内のみ。目的地から 1 km 以内で、到着時刻の曜日・祝日・利用時間に使える区間を選びます</small></span>
       </label>
     </li>
   </template>

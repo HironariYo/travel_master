@@ -18,6 +18,9 @@
   - 最大時間（60 分など）を超える・利用時間の終わりを過ぎるときは警告。1 km 以内に使える区間がなければ「路上駐車場なし」と出し、目的地へそのまま向かう
   - 利用時間外や対象外の日（日曜・休日など）に停めてよいかは区間ごとの標識しだいなので、「使えない」として扱う
 - 時刻はすべて日本時間で入力・表示する（端末のタイムゾーンによらない）
+- **日本語・英語・韓国語**に切り替えられる（右上の 🌐）。初回はブラウザの言語に合わせ、選んだ言語はブラウザに保存する。`?lang=en` のように URL でも指定できる
+  - 画面の文言は `static/i18n.js`、API のエラーは `src/messages.js`。場所の候補（Google / Photon）とエラーは選んだ言語で返す
+  - 文言を足すときは 3 言語ともに足す（ない言語は日本語で表示される）
 - Google マップとの連動
   - 「Google マップで全ルートを開く」／区間ごと・地点ごとのリンク（スマホでは Google マップのアプリが開く）
   - `GOOGLE_MAPS_API_KEY` を登録すると、ルート検索に **Google Routes API** を使い、出発時刻に合わせた**渋滞予測**つきの所要時間になる
@@ -41,12 +44,13 @@ Google の API は Worker から呼ぶので、キーはブラウザに出ませ
 ```
 src/worker.js     Worker のエントリポイント（/api/route, /api/places, /api/config。それ以外は static/ を返す）
 src/schedule.js   旅程の計算（到着・待ち・出発）と入力の検証
+src/messages.js   API のエラーメッセージ（日本語・英語・韓国語）
 src/routing.js    ルート検索（Google Routes API / OpenStreetMap）
 src/places.js     場所の候補（Google Places API / Photon）
 src/parking.js    近くの時間制限駐車区間を探す（曜日・祝日・利用時間の判定）
 src/data/         駐車区間と祝日のデータ（npm run build:parking で作る）
 scripts/          データを作るスクリプト
-static/           画面（index.html, app.js, style.css）
+static/           画面（index.html, app.js, i18n.js = 画面の文言, style.css）
 test/             単体テスト（node --test）
 ```
 

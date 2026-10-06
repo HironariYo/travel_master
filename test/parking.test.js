@@ -30,14 +30,14 @@ test('区間が使えるか: 曜日・祝日・時刻・お正月', () => {
   const d = data([]);
   const z = zone();
   assert.equal(zoneStatus(z, at('2026-10-05T10:00:00'), d).ok, true, '月曜 10 時');
-  assert.match(zoneStatus(z, at('2026-10-11T10:00:00'), d).reason, /日曜・休日は対象外/);
-  assert.match(zoneStatus(z, at('2026-11-03T10:00:00'), d).reason, /日曜・休日は対象外/, '文化の日（火）');
+  assert.deepEqual(zoneStatus(z, at('2026-10-11T10:00:00'), d).reason, { code: 'closed', closed: 'sunHoliday' });
+  assert.deepEqual(zoneStatus(z, at('2026-11-03T10:00:00'), d).reason, { code: 'closed', closed: 'sunHoliday' }, '文化の日（火）');
   assert.equal(zoneStatus(z, at('2026-10-10T10:00:00'), d).ok, true, '土曜は使える');
-  assert.match(zoneStatus(zone({ closed: 'weekendHoliday' }), at('2026-10-10T10:00:00'), d).reason, /土日・休日/);
+  assert.deepEqual(zoneStatus(zone({ closed: 'weekendHoliday' }), at('2026-10-10T10:00:00'), d).reason, { code: 'closed', closed: 'weekendHoliday' });
   assert.equal(zoneStatus(zone({ closed: 'none' }), at('2026-10-11T10:00:00'), d).ok, true, '曜日の制限なし');
-  assert.match(zoneStatus(z, at('2026-10-05T08:59:00'), d).reason, /利用時間外（9:00〜19:00）/);
-  assert.match(zoneStatus(z, at('2026-10-05T19:00:00'), d).reason, /利用時間外/);
-  assert.match(zoneStatus(zone({ closed: 'none' }), at('2027-01-02T10:00:00'), d).reason, /1月1日〜3日/);
+  assert.deepEqual(zoneStatus(z, at('2026-10-05T08:59:00'), d).reason, { code: 'outsideHours', from: '9:00', to: '19:00' });
+  assert.equal(zoneStatus(z, at('2026-10-05T19:00:00'), d).reason.code, 'outsideHours');
+  assert.deepEqual(zoneStatus(zone({ closed: 'none' }), at('2027-01-02T10:00:00'), d).reason, { code: 'newYear' });
   assert.deepEqual(zoneStatus(z, at('2028-05-01T10:00:00'), d).warnings, ['holidayUnknown'], '祝日データの範囲外');
 });
 
@@ -56,14 +56,14 @@ test('使える区間を選び、徒歩と最大時間を見る', () => {
   assert.equal(ok.walkMinutes, 2);
   assert.equal(ok.parkMinutes, 54, '滞在 50 分 + 徒歩往復 4 分');
   assert.deepEqual(ok.warnings, []);
-  assert.deepEqual(ok.zone, { id: 1, kind: 'パーキング・メーター', hours: '9:00〜19:00', limitMinutes: 60, fee: 300, closed: '日曜・休日' });
+  assert.deepEqual(ok.zone, { id: 1, kind: 'meter', from: '9:00', to: '19:00', limitMinutes: 60, fee: 300, closed: 'sunHoliday' });
 
   assert.deepEqual(findParking(d, target, at('2026-10-05T10:00:00'), 90).warnings, ['overLimit']);
   assert.deepEqual(findParking(d, target, at('2026-10-05T18:30:00'), 50).warnings, ['overHours']);
 
   const sunday = findParking(d, target, at('2026-10-11T10:00:00'), 50);
   assert.equal(sunday.status, 'unavailable');
-  assert.match(sunday.reason, /日曜・休日は対象外/);
+  assert.deepEqual(sunday.reason, { code: 'closed', closed: 'sunHoliday' });
 
   // 区間の北 約 1.1 km（目的地から 1 km より遠い区間は探さない）
   assert.equal(findParking(d, { lat: 35.691, lng: 139.701 }, at('2026-10-05T10:00:00'), 50).status, 'none', '1 km 以内にない');
@@ -84,7 +84,7 @@ test('実際の到着時刻で確かめ直す', () => {
   const found = findParking(d, target, at('2026-10-05T18:58:00'), 30);
   const late = recheckParking(d, found, at('2026-10-05T19:02:00'), 30);
   assert.ok(late.warnings.includes('unavailableAtArrival'));
-  assert.match(late.arrivalReason, /利用時間外/);
+  assert.equal(late.arrivalReason.code, 'outsideHours');
 });
 
 test('旅程: 駐車区間まで車で行き、徒歩の往復を滞在に足し、次は駐車場所から出る', async () => {

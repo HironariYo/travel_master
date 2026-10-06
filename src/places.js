@@ -1,7 +1,7 @@
 // 入力中の文字から場所の候補を出す
 // - GOOGLE_MAPS_API_KEY があれば Google Places API (New) の Autocomplete。候補の placeId をそのままルート検索に使う
 // - なければ Photon（OpenStreetMap のデータを使う、入力中の検索向けの公開サーバー）。候補の座標をルート検索に使う
-import { RoutingError } from './routing.js';
+import { RoutingError } from './messages.js';
 
 const MAX_RESULTS = 6;
 
@@ -15,8 +15,9 @@ const FIELD_MASK = [
   'suggestions.placePrediction.structuredFormat',
 ].join(',');
 
-export async function googleSuggest(apiKey, { q, near, sessionToken }, fetchImpl = fetch) {
-  const body = { input: q, languageCode: 'ja', regionCode: 'jp', includedRegionCodes: ['jp'] };
+export async function googleSuggest(apiKey, { q, near, sessionToken, lang = 'ja' }, fetchImpl = fetch) {
+  // 候補の名前・住所は画面の言語で返してもらう（日本国内に限る）
+  const body = { input: q, languageCode: lang, regionCode: 'jp', includedRegionCodes: ['jp'] };
   if (near) body.locationBias = { circle: { center: { latitude: near.lat, longitude: near.lng }, radius: 50000 } };
   // 同じ入力欄での一連の検索を 1 回の「セッション」として課金してもらう
   if (sessionToken) body.sessionToken = sessionToken;
@@ -29,7 +30,7 @@ export async function googleSuggest(apiKey, { q, near, sessionToken }, fetchImpl
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     console.error('[places api]', res.status, JSON.stringify(data?.error ?? data));
-    throw new RoutingError('場所の候補を取得できませんでした');
+    throw new RoutingError('placesFailed');
   }
   return (data.suggestions ?? [])
     .map((s) => s.placePrediction)
@@ -59,20 +60,22 @@ function photonDetail(p) {
 
 async function photonQuery(params, fetchImpl) {
   const res = await fetchImpl(`${PHOTON_URL}?${params}`, { headers: { 'User-Agent': 'travel-master/0.1 (route planner)' } });
-  if (!res.ok) throw new RoutingError('場所の候補を取得できませんでした');
+  if (!res.ok) throw new RoutingError('placesFailed');
   return (await res.json()).features ?? [];
 }
 
 // OpenStreetMap では日本の駅名に「駅」が付かない（「熱海」）ので、表示では付ける
+// 英語の名前（Atami）なら " Station"、それ以外（日本語の名前）なら「駅」
 function displayName(p) {
-  if (p.osm_key === 'railway' && (p.osm_value === 'station' || p.osm_value === 'halt') && !p.name.endsWith('駅')) {
-    return `${p.name}駅`;
-  }
-  return p.name;
+  const isStation = p.osm_key === 'railway' && (p.osm_value === 'station' || p.osm_value === 'halt');
+  if (!isStation || /(駅|station)$/i.test(p.name)) return p.name;
+  return /^[\x20-\x7e]+$/.test(p.name) ? `${p.name} Station` : `${p.name}駅`;
 }
 
-export async function photonSuggest({ q, near }, fetchImpl = fetch) {
+export async function photonSuggest({ q, near, lang = 'ja' }, fetchImpl = fetch) {
   const base = new URLSearchParams();
+  // Photon の言語は default（現地の名前）/ en / de / fr だけ。英語のときだけ英語の名前にする
+  if (lang === 'en') base.set('lang', 'en');
   if (near) {
     base.set('lat', String(near.lat));
     base.set('lon', String(near.lng));
@@ -82,7 +85,7 @@ export async function photonSuggest({ q, near }, fetchImpl = fetch) {
   main.set('limit', '15');
   const queries = [photonQuery(main, fetchImpl)];
   // 「熱海駅」と打たれたら、「熱海」という名前の駅も探して先頭に出す
-  const stationName = q.endsWith('駅') ? q.slice(0, -1).trim() : '';
+  const stationName = q.endsWith('駅') ? q.slice(0, -1).trim() : /\sstation$/i.test(q) ? q.replace(/\s+station$/i, '') : '';
   if (stationName) {
     const st = new URLSearchParams(base);
     st.set('q', stationName);

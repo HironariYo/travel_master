@@ -326,3 +326,13 @@ test('有料道路・高速道路の条件を区間ごとに指定できる', as
   );
   assert.deepEqual(r.legs.map((l) => l.options.avoidTolls), [true, false, false]);
 });
+
+test('API: エラーは画面の言語（lang）で返す', async () => {
+  const env = { ASSETS: { fetch: () => new Response('asset') } };
+  const post = (body) => worker.fetch(new Request('https://travel.example/api/route', { method: 'POST', body: JSON.stringify(body) }), env);
+  const stops = [{ place: 'A' }];
+  assert.match((await (await post({ stops })).json()).error, /出発地と目的地/, '既定は日本語');
+  assert.match((await (await post({ stops, lang: 'en' })).json()).error, /starting point and at least one destination/);
+  assert.match((await (await post({ stops, lang: 'ko' })).json()).error, /출발지와 목적지/);
+  assert.match((await (await post({ stops, lang: 'xx' })).json()).error, /出発地と目的地/, '知らない言語は日本語');
+});

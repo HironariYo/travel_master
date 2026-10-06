@@ -41,6 +41,13 @@ body {
 
 .site-header { max-width: 1280px; margin: 0 auto; padding: 24px 16px 8px; }
 .site-header h1 { margin: 0; font-size: 1.5rem; }
+.header-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.lang-switch { display: inline-flex; align-items: center; gap: 6px; }
+.lang-switch select {
+  font: inherit; font-size: .9rem; color: var(--text); background: var(--surface);
+  border: 1px solid var(--border); border-radius: 8px; padding: 5px 8px;
+}
+.visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .lead { margin: 4px 0 0; color: var(--muted); }
 
 .layout {

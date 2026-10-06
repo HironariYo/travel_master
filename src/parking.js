@@ -11,8 +11,6 @@ const WALK_DETOUR = 1.25;
 // 目的地からこの距離（m）より遠い区間は探さない
 export const DEFAULT_RADIUS = 1000;
 
-const CLOSED_LABEL = { sunHoliday: '日曜・休日', weekendHoliday: '土日・休日' };
-
 const pad = (n) => String(n).padStart(2, '0');
 export const formatMinutes = (m) => `${Math.floor(m / 60)}:${pad(m % 60)}`;
 
@@ -29,19 +27,21 @@ export function jstParts(ms) {
 }
 
 // 区間がその時刻に使えるか。使えないときは理由を返す
+// 理由は画面で各言語に訳せるよう、コードと値で返す
+//   { code: 'newYear' } / { code: 'closed', closed: 'sunHoliday' } / { code: 'outsideHours', from: '9:00', to: '19:00' }
 export function zoneStatus(zone, ms, data) {
   const t = jstParts(ms);
   const warnings = [];
-  if (t.month === 1 && t.day <= 3) return { ok: false, reason: '1月1日〜3日は対象外' };
+  if (t.month === 1 && t.day <= 3) return { ok: false, reason: { code: 'newYear' } };
   const holidaySet = data.holidaySet ?? (data.holidaySet = new Set(data.holidays));
   const holiday = holidaySet.has(t.date);
   if (!holiday && data.holidaysUntil && t.date > data.holidaysUntil) warnings.push('holidayUnknown');
   const closedToday =
     (zone.closed === 'sunHoliday' && (t.dow === 0 || holiday)) ||
     (zone.closed === 'weekendHoliday' && (t.dow === 0 || t.dow === 6 || holiday));
-  if (closedToday) return { ok: false, reason: `${CLOSED_LABEL[zone.closed]}は対象外`, warnings };
+  if (closedToday) return { ok: false, reason: { code: 'closed', closed: zone.closed }, warnings };
   if (t.minutes < zone.from || t.minutes >= zone.to) {
-    return { ok: false, reason: `利用時間外（${formatMinutes(zone.from)}〜${formatMinutes(zone.to)}）`, warnings };
+    return { ok: false, reason: { code: 'outsideHours', from: formatMinutes(zone.from), to: formatMinutes(zone.to) }, warnings };
   }
   return { ok: true, minutes: t.minutes, warnings };
 }
@@ -81,11 +81,12 @@ export const walkMinutesFor = (meters) => Math.max(1, Math.ceil((meters * WALK_D
 function zoneSummary(zone) {
   return {
     id: zone.id,
-    kind: zone.kind === 'ticket' ? 'パーキング・チケット' : 'パーキング・メーター',
-    hours: `${formatMinutes(zone.from)}〜${formatMinutes(zone.to)}`,
+    kind: zone.kind,
+    from: formatMinutes(zone.from),
+    to: formatMinutes(zone.to),
     limitMinutes: zone.limit,
     fee: zone.fee,
-    closed: CLOSED_LABEL[zone.closed] ?? null,
+    closed: zone.closed === 'none' ? null : zone.closed,
   };
 }
 

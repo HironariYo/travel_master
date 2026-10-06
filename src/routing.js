@@ -1,15 +1,9 @@
 // 車のルート検索
 // - GOOGLE_MAPS_API_KEY があれば Google Routes API（渋滞予測つき）
 // - なければ OpenStreetMap（Nominatim で住所を座標に、Valhalla でルート）。開発・お試し用で、渋滞は考慮しない
-import { InputError } from './schedule.js';
+import { InputError, RoutingError } from './messages.js';
 
-export class RoutingError extends Error {
-  constructor(message, status = 502) {
-    super(message);
-    this.name = 'RoutingError';
-    this.status = status;
-  }
-}
+export { RoutingError };
 
 // "35.6812, 139.7671" のような座標の入力
 const LATLNG = /^\s*(-?\d{1,2}(?:\.\d+)?)\s*,\s*(-?\d{1,3}(?:\.\d+)?)\s*$/;
@@ -53,7 +47,7 @@ function fromGoogleLatLng(loc) {
   return ll ? { lat: ll.latitude, lng: ll.longitude } : null;
 }
 
-export function googleRouter(apiKey, fetchImpl = fetch) {
+export function googleRouter(apiKey, fetchImpl = fetch, { lang = 'ja' } = {}) {
   return async function routeLeg(from, to, departureMs, { avoidTolls, avoidHighways } = {}, now = Date.now()) {
     // 渋滞予測は未来の出発時刻でしか使えない（過去を指定するとエラーになる）
     const trafficAware = departureMs > now + 60 * 1000;
@@ -62,7 +56,7 @@ export function googleRouter(apiKey, fetchImpl = fetch) {
       destination: googleWaypoint(to),
       travelMode: 'DRIVE',
       routingPreference: trafficAware ? 'TRAFFIC_AWARE' : 'TRAFFIC_UNAWARE',
-      languageCode: 'ja',
+      languageCode: lang,
       regionCode: 'jp',
       units: 'METRIC',
       routeModifiers: { avoidTolls: Boolean(avoidTolls), avoidHighways: Boolean(avoidHighways) },
@@ -77,11 +71,11 @@ export function googleRouter(apiKey, fetchImpl = fetch) {
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       console.error('[routes api]', res.status, JSON.stringify(data?.error ?? data));
-      if (res.status === 400) throw new InputError(`「${from.place}」→「${to.place}」のルートを検索できませんでした。地点を候補から選び直してください`);
-      throw new RoutingError('ルート検索サービスでエラーが発生しました');
+      if (res.status === 400) throw new InputError('routeSearchFailed', { from: from.place, to: to.place });
+      throw new RoutingError('routingServiceError');
     }
     const route = data.routes?.[0];
-    if (!route) throw new InputError(`「${from.place}」→「${to.place}」の車のルートが見つかりませんでした`);
+    if (!route) throw new InputError('noRoute', { from: from.place, to: to.place });
     const leg = route.legs?.[0] ?? {};
     return {
       durationSeconds: seconds(route.duration),
@@ -111,9 +105,9 @@ export function osmRouter(fetchImpl = fetch) {
     if (cache.has(place)) return cache.get(place);
     const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&accept-language=ja&q=${encodeURIComponent(place)}`;
     const res = await fetchImpl(url, { headers: { 'User-Agent': USER_AGENT, Accept: 'application/json' } });
-    if (!res.ok) throw new RoutingError('住所の検索サービスでエラーが発生しました');
+    if (!res.ok) throw new RoutingError('geocodeServiceError');
     const [hit] = await res.json();
-    if (!hit) throw new InputError(`「${place}」が見つかりませんでした。入力中に出る候補から選んでください`);
+    if (!hit) throw new InputError('placeNotFound', { place });
     const result = { lat: Number(hit.lat), lng: Number(hit.lon) };
     cache.set(place, result);
     return result;
@@ -144,14 +138,14 @@ export function osmRouter(fetchImpl = fetch) {
     if (!res.ok) {
       // 4xx で error_code があるのは「道が見つからない」など入力側の問題（442: 経路なし、171: 近くに道がない など）
       if (res.status >= 400 && res.status < 500 && data?.error_code) {
-        throw new InputError(`「${from.place}」→「${to.place}」の車のルートが見つかりませんでした`);
+        throw new InputError('noRoute', { from: from.place, to: to.place });
       }
       console.error('[valhalla]', res.status, JSON.stringify(data));
-      throw new RoutingError('ルート検索サービスでエラーが発生しました');
+      throw new RoutingError('routingServiceError');
     }
     const trip = data.trip;
     const leg = trip?.legs?.[0];
-    if (!trip || !leg) throw new InputError(`「${from.place}」→「${to.place}」の車のルートが見つかりませんでした`);
+    if (!trip || !leg) throw new InputError('noRoute', { from: from.place, to: to.place });
     return {
       durationSeconds: Math.round(trip.summary.time),
       distanceMeters: Math.round(trip.summary.length * 1000),

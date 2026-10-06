@@ -1,21 +1,18 @@
 // 旅程の計算（ルート検索の結果から、各地点の到着・出発時刻を決める）
 // 時刻はすべてエポックミリ秒で扱う。Worker は UTC で動くので、表示用の整形はブラウザ側で行う
 
+import { InputError } from './messages.js';
+
+export { InputError };
+
 const MINUTE = 60 * 1000;
 
 // "2026-10-05T09:00:00+09:00" などを受け取り、ミリ秒にする。空なら null
 export function parseTime(value) {
   if (value === undefined || value === null || value === '') return null;
   const ms = Date.parse(value);
-  if (Number.isNaN(ms)) throw new InputError(`時刻の形式が正しくありません: ${value}`);
+  if (Number.isNaN(ms)) throw new InputError('badTime', { value });
   return ms;
-}
-
-export class InputError extends Error {
-  constructor(message) {
-    super(message);
-    this.name = 'InputError';
-  }
 }
 
 // リクエストの検証と正規化
@@ -24,14 +21,14 @@ export class InputError extends Error {
 // avoidTolls・avoidHighways は「その地点まで」の区間の条件。地点にないときは全体の指定（body.avoidTolls など）を使う
 // parking: true の目的地は、近くの時間制限駐車区間（東京都内）まで車で行き、そこから歩く
 export function normalizePlan(body, { maxStops = 10 } = {}) {
-  if (!body || !Array.isArray(body.stops)) throw new InputError('stops がありません');
+  if (!body || !Array.isArray(body.stops)) throw new InputError('noStops');
   const stops = body.stops.map((s, i) => {
     const place = String(s?.place ?? '').trim();
-    if (!place) throw new InputError(`${i + 1} 番目の地点が空です`);
-    if (place.length > 200) throw new InputError(`${i + 1} 番目の地点が長すぎます`);
+    if (!place) throw new InputError('emptyStop', { n: i + 1 });
+    if (place.length > 200) throw new InputError('placeTooLong', { n: i + 1 });
     const stayMinutes = Number(s.stayMinutes ?? 0);
     if (!Number.isFinite(stayMinutes) || stayMinutes < 0 || stayMinutes > 7 * 24 * 60) {
-      throw new InputError(`${i + 1} 番目の滞在時間が正しくありません`);
+      throw new InputError('badStay', { n: i + 1 });
     }
     return {
       place,
@@ -44,9 +41,9 @@ export function normalizePlan(body, { maxStops = 10 } = {}) {
       parking: i > 0 && Boolean(s.parking),
     };
   });
-  if (stops.length < 2) throw new InputError('出発地と目的地を 1 つ以上入力してください');
-  if (stops.length > maxStops) throw new InputError(`地点は ${maxStops} か所までです`);
-  if (stops[0].departAt === null) throw new InputError('出発地の出発時刻を入力してください');
+  if (stops.length < 2) throw new InputError('needDestination');
+  if (stops.length > maxStops) throw new InputError('tooManyStops', { max: maxStops });
+  if (stops[0].departAt === null) throw new InputError('needDeparture');
   return { stops };
 }
 
@@ -100,11 +97,11 @@ export async function buildSchedule(plan, routeLeg, { parking } = {}) {
     let parked = null;
     if (stops[i].parking && parking) {
       if (!destination) {
-        parked = { status: 'none', reason: '目的地の位置が分かりませんでした' };
+        parked = { status: 'none', reason: { code: 'noLocation' } };
       } else {
         parked = parking.find(destination, departure + leg.durationSeconds * 1000, stops[i].stayMinutes);
         if (parked.status === 'ok') {
-          const spot = { place: `${stops[i].place}付近の駐車区間`, placeId: null, location: parked.point };
+          const spot = { place: `🅿 ${stops[i].place}`, placeId: null, location: parked.point };
           leg = await routeLeg(from, spot, departure, options);
         }
       }
