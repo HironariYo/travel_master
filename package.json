@@ -11,6 +11,7 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
+    "build:parking": "node scripts/build-parking-data.js",
     "test": "node --test test/*.test.js"
   },
   "devDependencies": {

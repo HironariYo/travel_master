@@ -41,6 +41,13 @@ body {
 
 .site-header { max-width: 1280px; margin: 0 auto; padding: 24px 16px 8px; }
 .site-header h1 { margin: 0; font-size: 1.5rem; }
+.header-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.lang-switch { display: inline-flex; align-items: center; gap: 6px; }
+.lang-switch select {
+  font: inherit; font-size: .9rem; color: var(--text); background: var(--surface);
+  border: 1px solid var(--border); border-radius: 8px; padding: 5px 8px;
+}
+.visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .lead { margin: 4px 0 0; color: var(--muted); }
 
 .layout {
@@ -241,3 +248,23 @@ body {
 .leg-options-label { flex-basis: 100%; color: var(--muted); font-size: .8rem; }
 .is-origin .leg-options { display: none; }
 .tag-avoid { color: var(--warn); }
+
+/* ---- 路上パーキング ---- */
+
+.parking-option {
+  display: flex; gap: 8px; align-items: flex-start;
+  margin-top: 8px; padding-top: 8px;
+  border-top: 1px dashed var(--border);
+  font-size: .88rem; cursor: pointer;
+}
+.parking-option input { margin-top: 3px; }
+.parking-option small { display: block; color: var(--muted); font-size: .76rem; }
+.is-origin .parking-option { display: none; }
+
+.parking { margin-top: 6px; padding: 6px 10px; border-left: 3px solid #475569; background: var(--accent-soft); border-radius: 0 6px 6px 0; font-size: .86rem; }
+.parking.is-none { border-left-color: var(--muted); color: var(--muted); }
+.parking-detail { color: var(--muted); font-size: .8rem; }
+.parking-warn { margin: 4px 0 0; padding: 0; list-style: none; color: var(--warn); font-size: .8rem; }
+.pin-parking { background: #475569; border-radius: 4px; font-size: 12px; }
+.source { margin: 12px 0 0; font-size: .75rem; color: var(--muted); }
+.source a { color: inherit; }

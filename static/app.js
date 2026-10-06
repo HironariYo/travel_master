@@ -1,4 +1,6 @@
 // ドライブ旅程プランナーの画面
+import { applyStatic, getLang, getLocale, LANGS, setLang, t } from './i18n.js';
+
 const STORAGE_KEY = 'travel-master:plan';
 const LEG_COLORS = ['#2563eb', '#d97706', '#059669', '#db2777', '#7c3aed', '#0891b2', '#dc2626', '#65a30d', '#9333ea'];
 
@@ -7,6 +9,8 @@ const stopsEl = $('#stops');
 const form = $('#plan-form');
 const template = $('#stop-template');
 let maxStops = 10;
+// 最後に計算した結果（言語を切り替えたときに表示し直す）
+let lastResult = null;
 
 // ---------- 入力欄 ----------
 
@@ -14,21 +18,25 @@ function pad(n) {
   return String(n).padStart(2, '0');
 }
 
-// Date → datetime-local の値（ブラウザのタイムゾーン）
-function toLocalInput(date) {
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+// 日本国内のドライブを計画するアプリなので、時刻は端末の設定によらず日本時間で入力・表示する
+// （駐車区間の曜日・利用時間も日本時間で判定する）
+const TIME_ZONE = 'Asia/Tokyo';
+const JST_OFFSET = 9 * 60 * 60 * 1000;
+
+// 初期値: 明日の 9:00（日本時間）
+function defaultStart() {
+  const d = new Date(Date.now() + JST_OFFSET + 24 * 60 * 60 * 1000);
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}T09:00`;
 }
 
-function defaultStart() {
-  const d = new Date();
-  d.setDate(d.getDate() + 1);
-  d.setHours(9, 0, 0, 0);
-  return toLocalInput(d);
+// datetime-local の値（タイムゾーンなし）を日本時間として ISO 形式にする
+function jstInputToIso(value) {
+  return new Date(`${value.length === 16 ? `${value}:00` : value}+09:00`).toISOString();
 }
 
 function addStop(values = {}) {
   if (stopsEl.children.length >= maxStops) {
-    showError(`地点は ${maxStops} か所までです`);
+    showError(t('maxStops', { n: maxStops }));
     return;
   }
   const node = template.content.firstElementChild.cloneNode(true);
@@ -40,6 +48,7 @@ function addStop(values = {}) {
   // 区間の条件。指定がなければ「全区間まとめて」の状態に合わせる
   $('[name=legAvoidTolls]', node).checked = values.avoidTolls ?? masterValue('avoidTolls');
   $('[name=legAvoidHighways]', node).checked = values.avoidHighways ?? masterValue('avoidHighways');
+  $('[name=parking]', node).checked = Boolean(values.parking);
   stopsEl.append(node);
   relabel();
   return node;
@@ -80,12 +89,16 @@ stopsEl.addEventListener('change', (e) => {
   if (e.target.name === 'legAvoidTolls' || e.target.name === 'legAvoidHighways') syncMasters();
 });
 
+function stopName(i) {
+  return i === 0 ? t('origin') : t('destination', { n: i });
+}
+
 function relabel() {
   [...stopsEl.children].forEach((li, i) => {
     const first = i === 0;
     li.classList.toggle('is-origin', first);
-    $('.stop-label', li).textContent = first ? '出発地' : `目的地 ${i}`;
-    $('.depart-label', li).textContent = first ? '出発日時（必須）' : '出発時刻（任意）';
+    $('.stop-label', li).textContent = stopName(i);
+    $('.depart-label', li).textContent = t(first ? 'departOrigin' : 'departStop');
     $('[name=departAt]', li).required = first;
     $('[data-action=remove]', li).disabled = stopsEl.children.length <= 2;
     $('[data-action=up]', li).disabled = first;
@@ -125,7 +138,7 @@ $('#reset').addEventListener('click', () => {
 form.addEventListener('input', () => {
   save();
   // 結果を出したあとに入力を変えたら、まだ反映されていないことを知らせる
-  if (!$('#summary').hidden) showStatus('入力が変わりました。「ルートとスケジュールを計算」を押すと反映されます');
+  if (!$('#summary').hidden) showStatus(t('inputChanged'));
 });
 
 function readForm() {
@@ -137,6 +150,7 @@ function readForm() {
       departAt: $('[name=departAt]', li).value,
       avoidTolls: $('[name=legAvoidTolls]', li).checked,
       avoidHighways: $('[name=legAvoidHighways]', li).checked,
+      parking: $('[name=parking]', li).checked,
     })),
   };
 }
@@ -313,7 +327,7 @@ function setupCombo(li) {
     controller?.abort();
     controller = new AbortController();
     session ??= newSessionToken();
-    const params = new URLSearchParams({ q, session });
+    const params = new URLSearchParams({ q, session, lang: getLang() });
     const near = nearFor(li);
     if (near) {
       params.set('lat', near.lat);
@@ -325,14 +339,14 @@ function setupCombo(li) {
       if (input.value.trim() !== q || document.activeElement !== input) return;
       if (!res.ok) {
         items = [];
-        return render(data.error || '候補を取得できませんでした');
+        return render(data.error || t('placesFailed'));
       }
       items = data.suggestions ?? [];
-      render(items.length ? '' : '候補が見つかりません。別の言葉でお試しください');
+      render(items.length ? '' : t('noSuggestions'));
     } catch (err) {
       if (err.name !== 'AbortError') {
         items = [];
-        render('候補を取得できませんでした');
+        render(t('placesFailed'));
       }
     }
   }
@@ -380,7 +394,7 @@ if (map) {
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
   }).addTo(map);
 } else {
-  $('#map').textContent = '地図を読み込めませんでした。時刻表と Google マップのリンクは使えます。';
+  $('#map').textContent = t('mapUnavailable');
   $('#map').classList.add('map-unavailable');
 }
 const routeLayer = map ? L.featureGroup().addTo(map) : null;
@@ -421,7 +435,18 @@ function drawMap(result) {
   result.legs.forEach((leg, i) => {
     if (!leg.polyline) return;
     L.polyline(decodePolyline(leg.polyline, leg.polylinePrecision), { color: LEG_COLORS[i % LEG_COLORS.length], weight: 5, opacity: 0.85 })
-      .bindTooltip(`${leg.from === 0 ? '出発地' : `目的地 ${leg.from}`} → 目的地 ${leg.to}：${formatDuration(leg.durationSeconds)}`)
+      .bindTooltip(t('legTooltip', { from: stopName(leg.from), to: stopName(leg.to), duration: formatDuration(leg.durationSeconds) }))
+      .addTo(routeLayer);
+  });
+  result.stops.forEach((s) => {
+    if (s.parking?.status !== 'ok') return;
+    const p = [s.parking.point.lat, s.parking.point.lng];
+    if (s.location) L.polyline([p, [s.location.lat, s.location.lng]], { color: '#475569', weight: 3, dashArray: '4 6' }).addTo(routeLayer);
+    L.marker(p, { icon: L.divIcon({ className: 'pin pin-parking', html: '<span>P</span>', iconSize: [24, 24], iconAnchor: [12, 12] }), title: t('parkingZone') })
+      .bindPopup(
+        `<strong>${escapeHtml(t('parkingPopup', { place: s.place }))}</strong><br>${escapeHtml(parkingDetail(s.parking))}<br>` +
+          escapeHtml(t('walkToDestination', { n: s.parking.walkMinutes })),
+      )
       .addTo(routeLayer);
   });
   result.stops.forEach((s, i) => {
@@ -437,18 +462,24 @@ function drawMap(result) {
 
 function popupTimes(s) {
   const parts = [];
-  if (s.arrival) parts.push(`到着 ${formatTime(s.arrival)}`);
-  if (!s.final || s.stayMinutes) parts.push(`${s.final ? '終了' : '出発'} ${formatTime(s.departure)}`);
+  if (s.arrival) parts.push(`${t('arrive')} ${formatTime(s.arrival)}`);
+  if (!s.final || s.stayMinutes) parts.push(`${t(s.final ? 'end' : 'depart')} ${formatTime(s.departure)}`);
   return parts.join(' / ');
 }
 
 // ---------- 表示 ----------
 
-const dateFmt = new Intl.DateTimeFormat('ja-JP', { month: 'numeric', day: 'numeric', weekday: 'short' });
-const timeFmt = new Intl.DateTimeFormat('ja-JP', { hour: '2-digit', minute: '2-digit' });
+// 日付・時刻の書き方は言語に合わせ、タイムゾーンはいつも日本時間
+let dateFmt;
+let timeFmt;
+function setupFormats() {
+  dateFmt = new Intl.DateTimeFormat(getLocale(), { timeZone: TIME_ZONE, month: 'numeric', day: 'numeric', weekday: 'short' });
+  timeFmt = new Intl.DateTimeFormat(getLocale(), { timeZone: TIME_ZONE, hour: '2-digit', minute: '2-digit', hour12: false });
+}
+setupFormats();
 
 function dayKey(ms) {
-  return new Date(ms).toDateString();
+  return Math.floor((ms + JST_OFFSET) / (24 * 60 * 60 * 1000));
 }
 
 function formatTime(ms) {
@@ -461,10 +492,7 @@ function formatDateTime(ms) {
 
 function formatDuration(totalSeconds) {
   const minutes = Math.round(totalSeconds / 60);
-  const h = Math.floor(minutes / 60);
-  const m = minutes % 60;
-  if (!h) return `${m}分`;
-  return m ? `${h}時間${m}分` : `${h}時間`;
+  return t('duration', { h: Math.floor(minutes / 60), m: minutes % 60 });
 }
 
 function formatDistance(m) {
@@ -481,21 +509,27 @@ function placeParam(s) {
   return s.place;
 }
 
+// 車で向かう先: 駐車区間に停める地点はその場所（座標）、それ以外は地点そのもの
+function driveTarget(s) {
+  if (s.parking?.status === 'ok') return { param: `${s.parking.point.lat},${s.parking.point.lng}`, placeId: null };
+  return { param: placeParam(s), placeId: s.placeId };
+}
+
 // Google マップのルート URL（https://developers.google.com/maps/documentation/urls/get-started）
 // 出発時刻は URL では指定できないので、時刻の検証は Google マップ側で行う
 function googleMapsUrl(stops) {
   const params = new URLSearchParams({ api: '1', travelmode: 'driving' });
-  const first = stops[0];
-  const last = stops[stops.length - 1];
-  const mid = stops.slice(1, -1);
-  params.set('origin', placeParam(first));
+  const [first, ...rest] = stops.map(driveTarget);
+  const last = rest.pop();
+  const mid = rest;
+  params.set('origin', first.param);
   if (first.placeId) params.set('origin_place_id', first.placeId);
-  params.set('destination', placeParam(last));
+  params.set('destination', last.param);
   if (last.placeId) params.set('destination_place_id', last.placeId);
   if (mid.length) {
-    params.set('waypoints', mid.map(placeParam).join('|'));
+    params.set('waypoints', mid.map((x) => x.param).join('|'));
     // waypoint_place_ids は waypoints と同じ数でないと無視されるので、全部あるときだけ付ける
-    if (mid.every((s) => s.placeId)) params.set('waypoint_place_ids', mid.map((s) => s.placeId).join('|'));
+    if (mid.every((x) => x.placeId)) params.set('waypoint_place_ids', mid.map((x) => x.placeId).join('|'));
   }
   return `https://www.google.com/maps/dir/?${params}`;
 }
@@ -507,52 +541,59 @@ function googlePlaceUrl(s) {
 }
 
 function renderSummary(result) {
-  const t = result.totals;
+  const sum = result.totals;
   const el = $('#summary');
   el.innerHTML = `
     <dl>
-      <div><dt>出発</dt><dd>${formatDateTime(t.start)}</dd></div>
-      <div><dt>終了</dt><dd>${formatDateTime(t.end)}</dd></div>
-      <div><dt>全体</dt><dd>${formatDuration((t.end - t.start) / 1000)}</dd></div>
-      <div><dt>運転</dt><dd>${formatDuration(t.driveSeconds)}</dd></div>
-      <div><dt>距離</dt><dd>${formatDistance(t.distanceMeters)}</dd></div>
-      <div><dt>滞在・待ち</dt><dd>${formatDuration((t.stayMinutes + t.waitMinutes) * 60)}</dd></div>
+      <div><dt>${t('sumStart')}</dt><dd>${formatDateTime(sum.start)}</dd></div>
+      <div><dt>${t('sumEnd')}</dt><dd>${formatDateTime(sum.end)}</dd></div>
+      <div><dt>${t('sumTotal')}</dt><dd>${formatDuration((sum.end - sum.start) / 1000)}</dd></div>
+      <div><dt>${t('sumDrive')}</dt><dd>${formatDuration(sum.driveSeconds)}</dd></div>
+      <div><dt>${t('sumDistance')}</dt><dd>${formatDistance(sum.distanceMeters)}</dd></div>
+      <div><dt>${t('sumStayWait')}</dt><dd>${formatDuration((sum.stayMinutes + sum.waitMinutes) * 60)}</dd></div>
+      ${sum.walkMinutes ? `<div><dt>${t('sumWalk')}</dt><dd>${formatDuration(sum.walkMinutes * 60)}</dd></div>` : ''}
     </dl>
-    <p class="conditions">ルートの条件: ${planConditionText(result.legs)}</p>`;
+    <p class="conditions">${escapeHtml(t('conditionsLabel', { text: planConditionText(result.legs) }))}</p>`;
   el.hidden = false;
 }
 
 function conditionText(options = {}) {
   const parts = [];
-  if (options.avoidTolls) parts.push('有料道路を使わない');
-  if (options.avoidHighways) parts.push('高速道路を使わない');
-  return parts.length ? parts.join('・') : '指定なし（有料道路・高速道路も使う）';
+  if (options.avoidTolls) parts.push(t('avoidTolls'));
+  if (options.avoidHighways) parts.push(t('avoidHighways'));
+  return parts.length ? parts.join(t('condJoin')) : t('condNone');
 }
 
 // 全区間が同じ条件ならその内容、違えば「区間ごと」
 function planConditionText(legs) {
   const texts = [...new Set(legs.map((l) => conditionText(l.options)))];
-  return texts.length === 1 ? texts[0] : '区間ごとに指定';
+  return texts.length === 1 ? texts[0] : t('condPerLeg');
 }
 
 function legConditionTags(options = {}) {
   const tags = [];
-  if (options.avoidTolls) tags.push('有料道路なし');
-  if (options.avoidHighways) tags.push('高速道路なし');
-  return tags.map((t) => `<span class="tag tag-avoid">${t}</span>`).join('');
+  if (options.avoidTolls) tags.push(t('tagNoToll'));
+  if (options.avoidHighways) tags.push(t('tagNoHighway'));
+  return tags.map((tag) => `<span class="tag tag-avoid">${escapeHtml(tag)}</span>`).join('');
 }
-
-const UNAVOIDABLE = { toll: '有料道路', highway: '高速道路' };
 
 function renderLinks(result) {
   const el = $('#links');
   el.innerHTML = `
-    <a class="btn btn-primary" href="${escapeHtml(googleMapsUrl(result.stops))}" target="_blank" rel="noopener">Google マップで全ルートを開く</a>
-    <button type="button" class="btn btn-ghost" id="share">共有リンクをコピー</button>
-    <button type="button" class="btn btn-ghost" id="copy-text">旅程をテキストでコピー</button>`;
+    <a class="btn btn-primary" href="${escapeHtml(googleMapsUrl(result.stops))}" target="_blank" rel="noopener">${t('openAll')}</a>
+    <button type="button" class="btn btn-ghost" id="share">${t('share')}</button>
+    <button type="button" class="btn btn-ghost" id="copy-text">${t('copyText')}</button>`;
   el.hidden = false;
   $('#share').addEventListener('click', () => copy(`${location.origin}${location.pathname}#plan=${encodePlan(readForm())}`, '#share'));
   $('#copy-text').addEventListener('click', () => copy(scheduleText(result), '#copy-text'));
+  // 駐車区間のデータは CC BY 4.0。使ったときは出典を出す
+  const src = $('#source');
+  src.hidden = !result.parkingSource;
+  if (result.parkingSource) {
+    const { url, dataDate } = result.parkingSource;
+    const link = `<a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(t('sourceName'))}</a>`;
+    src.innerHTML = t('source', { link, date: escapeHtml(dataDate ?? '') });
+  }
 }
 
 async function copy(text, sel) {
@@ -560,9 +601,9 @@ async function copy(text, sel) {
   const label = btn.textContent;
   try {
     await navigator.clipboard.writeText(text);
-    btn.textContent = 'コピーしました';
+    btn.textContent = t('copied');
   } catch {
-    window.prompt('コピーしてください', text);
+    window.prompt(t('copyPrompt'), text);
   }
   setTimeout(() => (btn.textContent = label), 1500);
 }
@@ -571,15 +612,92 @@ function scheduleText(result) {
   const lines = [];
   result.stops.forEach((s, i) => {
     const leg = result.legs[i - 1];
-    if (leg) lines.push(`  ↓ 車 ${formatDuration(leg.durationSeconds)}（${formatDistance(leg.distanceMeters)}）`);
-    const head = i === 0 ? '出発地' : `目的地 ${i}`;
-    const times = [s.arrival ? `${formatDateTime(s.arrival)} 着` : null, !s.final || s.stayMinutes ? `${formatDateTime(s.departure)} ${s.final ? '終了' : '発'}` : null]
+    if (leg) lines.push(t('textCar', { duration: formatDuration(leg.durationSeconds), distance: formatDistance(leg.distanceMeters) }));
+    const head = stopName(i);
+    const times = [
+      s.arrival ? t('textArrive', { time: formatDateTime(s.arrival) }) : null,
+      !s.final || s.stayMinutes ? t(s.final ? 'textEnd' : 'textDepart', { time: formatDateTime(s.departure) }) : null,
+    ]
       .filter(Boolean)
       .join(' → ');
     lines.push(`${head}: ${s.place}  ${times}`);
+    if (s.parking && s.parking.status !== 'ok') lines.push(`  🅿 ${t('noParking')}`);
+    if (s.parking?.status === 'ok') {
+      const p = s.parking;
+      const detail = parkingDetail(p);
+      lines.push(`${t('textParking', { meters: p.distanceMeters, walk: p.walkMinutes, detail })} https://www.google.com/maps/search/?api=1&query=${p.point.lat},${p.point.lng}`);
+    }
   });
-  lines.push('', `Google マップ: ${googleMapsUrl(result.stops)}`);
+  lines.push('', `${t('textGoogleMaps')}: ${googleMapsUrl(result.stops)}`);
   return lines.join('\n');
+}
+
+// ---------- 駐車区間 ----------
+
+const CLOSED_KEYS = { sunHoliday: 'closedSunHoliday', weekendHoliday: 'closedWeekendHoliday' };
+
+const zoneHours = (z) => t('hours', { from: z.from, to: z.to });
+
+function parkingDetail(p) {
+  const z = p.zone;
+  const kind = t(z.kind === 'ticket' ? 'ticket' : 'meter');
+  if (p.offDay) {
+    // メーターが止まる日（日曜・休日など）。料金・最大時間はかからない
+    const days = p.offReason?.code === 'newYear' ? t('offDayNewYear') : t(CLOSED_KEYS[p.offReason?.closed]);
+    return t('offDayDetail', { kind, days, hours: zoneHours(z), limit: z.limitMinutes });
+  }
+  return t('parkingDetail', {
+    kind: t(z.kind === 'ticket' ? 'ticket' : 'meter'),
+    hours: zoneHours(z),
+    closed: z.closed ? t(CLOSED_KEYS[z.closed]) : '',
+    limit: z.limitMinutes,
+    fee: z.fee,
+  });
+}
+
+// サーバーが返す理由のコード（{ code, ... }）を今の言語の文にする
+function reasonText(reason) {
+  if (!reason) return '';
+  if (reason.code === 'newYear') return t('reasonNewYear');
+  if (reason.code === 'closed') return t('reasonClosed', { days: t(CLOSED_KEYS[reason.closed]) });
+  if (reason.code === 'outsideHours') return t('reasonOutsideHours', { hours: t('hours', { from: reason.from, to: reason.to }) });
+  if (reason.code === 'noLocation') return t('reasonNoLocation');
+  return '';
+}
+
+function parkingWarnings(p) {
+  const z = p.zone;
+  return p.warnings
+    .map((w) => {
+      if (w === 'overLimit') {
+        // 滞在の上限は最大時間だけで見る（利用時間の終わりは overHours で別に知らせる）
+        return t('warnOverLimit', { minutes: p.parkMinutes, limit: z.limitMinutes, maxStay: Math.max(0, z.limitMinutes - p.walkMinutes * 2) });
+      }
+      if (w === 'overHours') return t('warnOverHours', { hours: zoneHours(z) });
+      if (w === 'unavailableAtArrival') return t('warnUnavailableAtArrival', { reason: reasonText(p.arrivalReason) });
+      if (w === 'holidayUnknown') return t('warnHolidayUnknown');
+      if (w === 'checkSigns') return t('warnCheckSigns');
+      return null;
+    })
+    .filter(Boolean);
+}
+
+function parkingHtml(s) {
+  const p = s.parking;
+  if (p.status === 'ok') {
+    const mapUrl = `https://www.google.com/maps/search/?${new URLSearchParams({ api: '1', query: `${p.point.lat},${p.point.lng}` })}`;
+    const warns = parkingWarnings(p).map((w) => `<li>⚠ ${escapeHtml(w)}</li>`).join('');
+    return `
+      <div class="parking">
+        <div>🅿 <strong>${escapeHtml(t('parkHere'))}</strong>: ${escapeHtml(t('parkDistance', { meters: p.distanceMeters, walk: p.walkMinutes }))}
+          <a href="${escapeHtml(mapUrl)}" target="_blank" rel="noopener" class="tl-link">${escapeHtml(t('parkingSpot'))}</a></div>
+        <div class="parking-detail">${escapeHtml(parkingDetail(p))}</div>
+        ${warns ? `<ul class="parking-warn">${warns}</ul>` : ''}
+      </div>`;
+  }
+  // 1 km 以内に使える区間がない。近くにあっても到着時刻に使えないときは、その理由だけ添える
+  const reason = p.status === 'unavailable' ? t('noParkingReason', { reason: reasonText(p.reason) }) : '';
+  return `<div class="parking is-none">🅿 ${escapeHtml(t('noParking') + reason)}</div>`;
 }
 
 function renderTimeline(result) {
@@ -596,9 +714,9 @@ function renderTimeline(result) {
       const legStops = [result.stops[i - 1], s];
       li.innerHTML = `
         <span class="tl-leg-line" aria-hidden="true"></span>
-        <span class="tl-leg-text">🚗 ${formatDuration(leg.durationSeconds)}・${formatDistance(leg.distanceMeters)}${leg.trafficAware ? '<span class="tag">渋滞予測</span>' : ''}${legConditionTags(leg.options)}</span>
-        ${leg.unavoidable?.length ? `<span class="tl-leg-warn">⚠ この区間は${leg.unavoidable.map((k) => UNAVOIDABLE[k]).join('・')}を通らないと行けません</span>` : ''}
-        <a href="${escapeHtml(googleMapsUrl(legStops))}" target="_blank" rel="noopener" class="tl-link">この区間を Google マップで</a>`;
+        <span class="tl-leg-text">🚗 ${formatDuration(leg.durationSeconds)}${t('sep')}${formatDistance(leg.distanceMeters)}${leg.trafficAware ? `<span class="tag">${t('tagTraffic')}</span>` : ''}${legConditionTags(leg.options)}</span>
+        ${leg.unavoidable?.length ? `<span class="tl-leg-warn">${escapeHtml(t('unavoidable', { roads: leg.unavoidable.map((k) => t(k)).join(t('condJoin')) }))}</span>` : ''}
+        <a href="${escapeHtml(googleMapsUrl(legStops))}" target="_blank" rel="noopener" class="tl-link">${t('legLink')}</a>`;
       el.append(li);
     }
 
@@ -614,32 +732,36 @@ function renderTimeline(result) {
     const li = document.createElement('li');
     li.className = `tl-stop${i === 0 ? ' is-origin' : ''}${s.final ? ' is-final' : ''}${s.late ? ' is-late' : ''}`;
     const rows = [];
-    if (s.arrival) rows.push(`<div><dt>到着</dt><dd>${formatTime(s.arrival)}</dd></div>`);
-    if (i > 0 && s.stayMinutes) rows.push(`<div><dt>滞在</dt><dd>${formatDuration(s.stayMinutes * 60)}</dd></div>`);
-    if (s.waitMinutes) rows.push(`<div><dt>出発待ち</dt><dd>${formatDuration(s.waitMinutes * 60)}</dd></div>`);
+    if (s.arrival) rows.push(`<div><dt>${t('arrive')}</dt><dd>${formatTime(s.arrival)}</dd></div>`);
+    if (s.walkMinutes) rows.push(`<div><dt>${t('walk')}</dt><dd>${t('walkOneWay', { n: s.walkMinutes })}</dd></div>`);
+    if (i > 0 && s.stayMinutes) rows.push(`<div><dt>${t('stay')}</dt><dd>${formatDuration(s.stayMinutes * 60)}</dd></div>`);
+    if (s.waitMinutes) rows.push(`<div><dt>${t('wait')}</dt><dd>${formatDuration(s.waitMinutes * 60)}</dd></div>`);
     if (!s.final || s.stayMinutes) {
       const crossesDay = s.arrival && dayKey(s.arrival) !== dayKey(s.departure);
-      rows.push(`<div><dt>${s.final ? '終了' : '出発'}</dt><dd>${crossesDay ? formatDateTime(s.departure) : formatTime(s.departure)}</dd></div>`);
+      rows.push(`<div><dt>${t(s.final ? 'end' : 'depart')}</dt><dd>${crossesDay ? formatDateTime(s.departure) : formatTime(s.departure)}</dd></div>`);
     }
     li.innerHTML = `
       <div class="tl-marker">${i === 0 ? 'S' : i}</div>
       <div class="tl-body">
         <div class="tl-title">
           <strong>${escapeHtml(s.place)}</strong>
-          <a href="${escapeHtml(googlePlaceUrl(s))}" target="_blank" rel="noopener" class="tl-link">地図</a>
+          <a href="${escapeHtml(googlePlaceUrl(s))}" target="_blank" rel="noopener" class="tl-link">${t('placeLink')}</a>
         </div>
         <dl class="tl-times">${rows.join('')}</dl>
-        ${s.late ? `<p class="warn">指定の出発時刻に ${formatDuration(s.lateMinutes * 60)} 間に合いません。滞在を短くするか、時刻を見直してください。</p>` : ''}
+        ${s.parking ? parkingHtml(s) : ''}
+        ${s.late ? `<p class="warn">${escapeHtml(t('late', { duration: formatDuration(s.lateMinutes * 60) }))}</p>` : ''}
       </div>`;
     el.append(li);
   });
 }
 
 function clearResults() {
+  lastResult = null;
   routeLayer?.clearLayers();
   $('#timeline').replaceChildren();
   $('#summary').hidden = true;
   $('#links').hidden = true;
+  $('#source').hidden = true;
   $('#empty').hidden = false;
   showError('');
   showStatus('');
@@ -659,24 +781,36 @@ function showError(message) {
 
 // ---------- 計算 ----------
 
+function renderResult(data) {
+  $('#empty').hidden = true;
+  const badge = $('#provider');
+  badge.textContent = t(data.provider === 'google' ? 'providerGoogle' : 'providerOsm');
+  badge.hidden = false;
+  drawMap(data);
+  renderSummary(data);
+  renderLinks(data);
+  renderTimeline(data);
+}
+
 form.addEventListener('submit', async (e) => {
   e.preventDefault();
   showError('');
   const plan = readForm();
   const missing = plan.stops.findIndex((s) => !s.place);
-  if (missing >= 0) return showError(`${missing === 0 ? '出発地' : `目的地 ${missing}`}を入力してください`);
-  if (!plan.stops[0].departAt) return showError('出発地の出発日時を入力してください');
+  if (missing >= 0) return showError(t('enterPlace', { name: stopName(missing) }));
+  if (!plan.stops[0].departAt) return showError(t('enterDeparture'));
 
-  // datetime-local はタイムゾーンを持たないので、ブラウザの時刻として ISO 形式に直して送る
+  // datetime-local はタイムゾーンを持たないので、日本時間として ISO 形式に直して送る
   const body = {
     ...plan,
-    stops: plan.stops.map((s) => ({ ...s, departAt: s.departAt ? new Date(s.departAt).toISOString() : null })),
+    lang: getLang(),
+    stops: plan.stops.map((s) => ({ ...s, departAt: s.departAt ? jstInputToIso(s.departAt) : null })),
   };
 
   const btn = $('#submit');
   showStatus('');
   btn.disabled = true;
-  btn.textContent = '計算中…';
+  btn.textContent = t('calculating');
   try {
     const res = await fetch('/api/route', {
       method: 'POST',
@@ -684,27 +818,39 @@ form.addEventListener('submit', async (e) => {
       body: JSON.stringify(body),
     });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || `エラーが発生しました（${res.status}）`);
-    $('#empty').hidden = true;
-    const badge = $('#provider');
-    badge.textContent = data.provider === 'google' ? 'Google Routes API' : 'OpenStreetMap（渋滞は考慮しません）';
-    badge.hidden = false;
-    drawMap(data);
-    renderSummary(data);
-    renderLinks(data);
-    renderTimeline(data);
-    showStatus(`計算しました（${formatTime(Date.now())}・${planConditionText(data.legs)}）`);
+    if (!res.ok) throw new Error(data.error || t('httpError', { status: res.status }));
+    lastResult = data;
+    renderResult(data);
+    showStatus(t('calculated', { time: formatTime(Date.now()), conditions: planConditionText(data.legs) }));
     if (window.matchMedia('(max-width: 900px)').matches) $('#result-title').scrollIntoView({ behavior: 'smooth' });
   } catch (err) {
-    showError(err.message || '通信に失敗しました');
+    showError(err.message || t('network'));
   } finally {
     btn.disabled = false;
-    btn.textContent = 'ルートとスケジュールを計算';
+    btn.textContent = t('submit');
   }
+});
+
+// ---------- 言語 ----------
+
+const langSelect = $('#lang');
+for (const l of LANGS) langSelect.add(new Option(l.label, l.code));
+langSelect.value = getLang();
+langSelect.addEventListener('change', () => {
+  setLang(langSelect.value);
+  setupFormats();
+  applyStatic();
+  relabel();
+  if (!map) $('#map').textContent = t('mapUnavailable');
+  // 結果は、文言・日付の書き方だけ変えて表示し直す（ルートは検索し直さない）
+  if (lastResult) renderResult(lastResult);
+  showStatus('');
+  showError('');
 });
 
 // ---------- 起動 ----------
 
+applyStatic();
 const initial = loadInitialPlan();
 fillForm(initial.plan);
 fetch('/api/config')
