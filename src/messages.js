@@ -25,6 +25,7 @@ const MESSAGES = {
     placesFailed: () => '場所の候補を取得できませんでした',
     badJson: () => 'JSON の形式が正しくありません',
     unknownError: () => 'エラーが発生しました',
+    tollsUnavailable: () => '有料道路の料金は Google のキーがあるときだけ計算できます',
   },
   en: {
     badTime: ({ value }) => `Invalid time format: ${value}`,
@@ -43,6 +44,7 @@ const MESSAGES = {
     placesFailed: () => "Couldn't get place suggestions",
     badJson: () => 'Invalid JSON',
     unknownError: () => 'Something went wrong',
+    tollsUnavailable: () => 'Toll fees can only be calculated when a Google API key is set',
   },
   ko: {
     badTime: ({ value }) => `시각 형식이 올바르지 않습니다: ${value}`,
@@ -61,6 +63,7 @@ const MESSAGES = {
     placesFailed: () => '장소 후보를 가져오지 못했습니다',
     badJson: () => 'JSON 형식이 올바르지 않습니다',
     unknownError: () => '오류가 발생했습니다',
+    tollsUnavailable: () => '유료도로 요금은 Google 키가 있을 때만 계산할 수 있습니다',
   },
 };
 

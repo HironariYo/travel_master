@@ -35,7 +35,6 @@ const FIELD_MASK = [
 // 日本ではパスなし（現金）だと料金が返らない（2026-10 に確認）ので、現金は ETC の料金を目安として出す。
 // NEXCO の高速道路では ETC の通常料金と現金はほぼ同じだが、首都高などは現金のほうが高いことがある
 // また Google が料金を持っていない道（首都高だけの区間、圏央道など）は「料金不明」になる
-export const TOLL_PAYMENTS = ['etc2', 'etc', 'cash', 'none'];
 const TOLL_PASSES = { etc2: ['JP_ETC2'], etc: ['JP_ETC'], cash: ['JP_ETC'] };
 
 // Money（units は文字列、nanos は 10^-9）→ 数値
@@ -149,7 +148,7 @@ export function osmRouter(fetchImpl = fetch) {
     return result;
   }
 
-  return async function routeLeg(from, to, departureMs, { avoidTolls, avoidHighways, tollPayment = 'none' } = {}) {
+  return async function routeLeg(from, to, departureMs, { avoidTolls, avoidHighways } = {}) {
     const a = await geocode(from);
     const b = await geocode(to);
     // 0 にすると、その道をできるだけ避ける（ほかに道がなければ通る。そのときは hasToll などで知らせる）
@@ -191,8 +190,6 @@ export function osmRouter(fetchImpl = fetch) {
       end: b,
       trafficAware: false,
       hasToll: Boolean(trip.summary.has_toll),
-      // OpenStreetMap では料金は分からない。有料道路を通るかだけ分かる
-      toll: tollPayment === 'none' ? undefined : trip.summary.has_toll ? { status: 'unknown' } : null,
       hasHighway: Boolean(trip.summary.has_highway),
     };
   };
