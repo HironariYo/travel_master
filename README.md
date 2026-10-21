@@ -22,6 +22,10 @@
 - **日本語・英語・韓国語**に切り替えられる（右上の 🌐）。初回はブラウザの言語に合わせ、選んだ言語はブラウザに保存する。`?lang=en` のように URL でも指定できる
   - 画面の文言は `static/i18n.js`、API のエラーは `src/messages.js`。場所の候補（Google / Photon）とエラーは選んだ言語で返す
   - 文言を足すときは 3 言語ともに足す（ない言語は日本語で表示される）
+- **有料道路の料金**（Google のキーがあるとき）: 結果の「💴 有料道路の料金を計算」ボタンを押すと、区間ごとの料金と合計を表示する。払い方は ETC2.0（既定）／ETC／現金（目安）から選ぶ（変えたら押し直す）
+  - Google Routes API の料金計算を使う（`JP_ETC2` / `JP_ETC`）。日本では現金の料金は返らないので、現金は ETC の料金を目安として出す
+  - Google に料金のデータがない有料道路（首都高だけの区間、圏央道など）は「料金不明」になり、合計に「＋不明あり」と出る
+  - 料金を計算するルート検索は Compute Routes Enterprise 扱い（月 1,000 回まで無料）で高いので、ボタンを押したときだけ計算する（`/api/tolls`、`src/tolls.js`）。キーなし（OpenStreetMap）ではボタンは出ず、有料道路を通る区間に「有料道路あり」とだけ出る
 - Google マップとの連動
   - 「Google マップで全ルートを開く」／区間ごと・地点ごとのリンク（スマホでは Google マップのアプリが開く）
   - `GOOGLE_MAPS_API_KEY` を登録すると、ルート検索に **Google Routes API** を使い、出発時刻に合わせた**渋滞予測**つきの所要時間になる
@@ -43,11 +47,12 @@ Google の API は Worker から呼ぶので、キーはブラウザに出ませ
 ## 構成
 
 ```
-src/worker.js     Worker のエントリポイント（/api/route, /api/places, /api/config。それ以外は static/ を返す）
+src/worker.js     Worker のエントリポイント（/api/route, /api/places, /api/tolls, /api/config。それ以外は static/ を返す）
 src/schedule.js   旅程の計算（到着・待ち・出発）と入力の検証
 src/messages.js   API のエラーメッセージ（日本語・英語・韓国語）
 src/routing.js    ルート検索（Google Routes API / OpenStreetMap）
 src/places.js     場所の候補（Google Places API / Photon）
+src/tolls.js      有料道路の料金（/api/tolls。ボタンを押したときだけ）
 src/parking.js    近くの時間制限駐車区間を探す（曜日・祝日・利用時間の判定）
 src/data/         駐車区間と祝日のデータ（npm run build:parking で作る）
 scripts/          データを作るスクリプト

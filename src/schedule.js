@@ -47,6 +47,22 @@ export function normalizePlan(body, { maxStops = 10 } = {}) {
   return { stops };
 }
 
+// 地点（{ place, placeId?, lat?, lng? }）の検証。料金の計算（/api/tolls）で区間の両端を受け取るときにも使う
+export function normalizeWaypoint(w, n) {
+  const place = String(w?.place ?? '').trim();
+  if (!place) throw new InputError('emptyStop', { n });
+  if (place.length > 200) throw new InputError('placeTooLong', { n });
+  return { place, placeId: parsePlaceId(w.placeId), location: parseLocation(w.lat, w.lng) };
+}
+
+// 区間の両端として結果に入れる形（そのまま /api/tolls に送り返せる）
+function waypointOf(stop) {
+  const w = { place: stop.place };
+  if (stop.placeId) w.placeId = stop.placeId;
+  if (stop.location) Object.assign(w, { lat: stop.location.lat, lng: stop.location.lng });
+  return w;
+}
+
 // Google の Place ID。形式が違うものは無視して、文字で検索する
 function parsePlaceId(value) {
   return typeof value === 'string' && /^[A-Za-z0-9_-]{1,512}$/.test(value) ? value : null;
@@ -92,7 +108,9 @@ export async function buildSchedule(plan, routeLeg, { parking } = {}) {
   for (let i = 1; i < stops.length; i++) {
     // 区間ごとの条件（stops[i] まで）
     const options = { avoidTolls: stops[i].avoidTolls, avoidHighways: stops[i].avoidHighways };
-    let leg = await routeLeg(from, stops[i], departure, options);
+    // 有料道路の料金はここでは計算しない（高い料金区分になるため）。画面のボタンで /api/tolls を呼んだときだけ計算する
+    let target = stops[i];
+    let leg = await routeLeg(from, target, departure, options);
     const destination = leg.end ?? stops[i].location;
     let parked = null;
     if (stops[i].parking && parking) {
@@ -101,8 +119,8 @@ export async function buildSchedule(plan, routeLeg, { parking } = {}) {
       } else {
         parked = parking.find(destination, departure + leg.durationSeconds * 1000, stops[i].stayMinutes);
         if (parked.status === 'ok') {
-          const spot = { place: `🅿 ${stops[i].place}`, placeId: null, location: parked.point };
-          leg = await routeLeg(from, spot, departure, options);
+          target = { place: `🅿 ${stops[i].place}`, placeId: null, location: parked.point };
+          leg = await routeLeg(from, target, departure, options);
         }
       }
     }
@@ -118,6 +136,10 @@ export async function buildSchedule(plan, routeLeg, { parking } = {}) {
       polylinePrecision: leg.polylinePrecision ?? 5,
       trafficAware: Boolean(leg.trafficAware),
       options,
+      // 実際に検索した両端（駐車するときは駐車場所）。料金を計算するときにそのまま使う
+      waypoints: { from: waypointOf(from), to: waypointOf(target) },
+      // 有料道路を通るか（OpenStreetMap のときだけ分かる。Google では料金の計算で分かる）
+      usesToll: leg.hasToll,
       // 「使わない」を指定したのに通らざるを得なかった道（OpenStreetMap のときだけ分かる）
       unavoidable: [
         options.avoidTolls && leg.hasToll ? 'toll' : null,

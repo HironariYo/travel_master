@@ -27,7 +27,28 @@ const FIELD_MASK = [
   'routes.polyline.encodedPolyline',
   'routes.legs.startLocation',
   'routes.legs.endLocation',
+  'routes.travelAdvisory.tollInfo',
 ].join(',');
+
+// 有料道路の料金の払い方 → Routes API の tollPasses
+// https://developers.google.com/maps/documentation/routes/calculate_toll_fees
+// 日本ではパスなし（現金）だと料金が返らない（2026-10 に確認）ので、現金は ETC の料金を目安として出す。
+// NEXCO の高速道路では ETC の通常料金と現金はほぼ同じだが、首都高などは現金のほうが高いことがある
+// また Google が料金を持っていない道（首都高だけの区間、圏央道など）は「料金不明」になる
+const TOLL_PASSES = { etc2: ['JP_ETC2'], etc: ['JP_ETC'], cash: ['JP_ETC'] };
+
+// Money（units は文字列、nanos は 10^-9）→ 数値
+function money(m) {
+  return Number(m?.units ?? 0) + Number(m?.nanos ?? 0) / 1e9;
+}
+
+// tollInfo → { status: 'priced', amount, currency } / { status: 'unknown' }（有料道路を通るが料金が出ない）/ null（有料道路なし）
+export function parseTollInfo(tollInfo) {
+  if (!tollInfo) return null;
+  const price = (tollInfo.estimatedPrice ?? []).find((p) => p.currencyCode === 'JPY') ?? tollInfo.estimatedPrice?.[0];
+  if (!price) return { status: 'unknown' };
+  return { status: 'priced', amount: Math.round(money(price)), currency: price.currencyCode };
+}
 
 // 候補から選んだ地点は Place ID か座標、手で打った地点は文字（座標の形なら座標）で渡す
 function googleWaypoint(stop) {
@@ -47,8 +68,13 @@ function fromGoogleLatLng(loc) {
   return ll ? { lat: ll.latitude, lng: ll.longitude } : null;
 }
 
+// 現金は ETC の料金からの目安であることを印す
+function withEstimate(toll, tollPayment) {
+  return toll?.status === 'priced' && tollPayment === 'cash' ? { ...toll, estimate: true } : toll;
+}
+
 export function googleRouter(apiKey, fetchImpl = fetch, { lang = 'ja' } = {}) {
-  return async function routeLeg(from, to, departureMs, { avoidTolls, avoidHighways } = {}, now = Date.now()) {
+  return async function routeLeg(from, to, departureMs, { avoidTolls, avoidHighways, tollPayment = 'none' } = {}, now = Date.now()) {
     // 渋滞予測は未来の出発時刻でしか使えない（過去を指定するとエラーになる）
     const trafficAware = departureMs > now + 60 * 1000;
     const body = {
@@ -62,6 +88,13 @@ export function googleRouter(apiKey, fetchImpl = fetch, { lang = 'ja' } = {}) {
       routeModifiers: { avoidTolls: Boolean(avoidTolls), avoidHighways: Boolean(avoidHighways) },
     };
     if (trafficAware) body.departureTime = new Date(departureMs).toISOString();
+    // 料金の計算は Compute Routes Enterprise の料金になる（月 1,000 回まで無料）ので、
+    // 計算しない設定のときと、有料道路を使わない区間では頼まない
+    const withTolls = TOLL_PASSES[tollPayment] !== undefined && !avoidTolls;
+    if (withTolls) {
+      body.extraComputations = ['TOLLS'];
+      body.routeModifiers.tollPasses = TOLL_PASSES[tollPayment];
+    }
 
     const res = await fetchImpl(ROUTES_URL, {
       method: 'POST',
@@ -84,6 +117,8 @@ export function googleRouter(apiKey, fetchImpl = fetch, { lang = 'ja' } = {}) {
       start: fromGoogleLatLng(leg.startLocation),
       end: fromGoogleLatLng(leg.endLocation),
       trafficAware,
+      // 料金を頼まなかったときは undefined（画面には出さない）
+      toll: withTolls ? withEstimate(parseTollInfo(route.travelAdvisory?.tollInfo), tollPayment) : avoidTolls ? null : undefined,
     };
   };
 }

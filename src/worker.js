@@ -6,6 +6,7 @@ import { findParking, recheckParking } from './parking.js';
 import { googleSuggest, photonSuggest } from './places.js';
 import { googleRouter, osmRouter, RoutingError } from './routing.js';
 import { buildSchedule, InputError, normalizePlan } from './schedule.js';
+import { computeTolls, normalizeTollRequest } from './tolls.js';
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -57,6 +58,30 @@ export async function handleRoute(request, env) {
   }
 }
 
+// POST /api/tolls（有料道路の料金。画面のボタンを押したときだけ呼ばれる。tolls.js を参照）
+export async function handleTolls(request, env) {
+  if (request.method !== 'POST') return json({ error: 'Method Not Allowed' }, 405);
+  if (isCrossSite(request)) return json({ error: 'Forbidden' }, 403);
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: message('ja', 'badJson') }, 400);
+  }
+  const lang = normalizeLang(body?.lang);
+  if (!env.GOOGLE_MAPS_API_KEY) return json({ error: message(lang, 'tollsUnavailable') }, 400);
+  try {
+    const req = normalizeTollRequest(body, { maxLegs: (Number(env.MAX_STOPS) || 10) - 1 });
+    return json(await computeTolls(req, googleRouter(env.GOOGLE_MAPS_API_KEY, fetch, { lang })));
+  } catch (err) {
+    if (err instanceof InputError || err instanceof RoutingError) {
+      return json({ error: message(lang, err.key, err.params) }, err instanceof InputError ? 400 : err.status);
+    }
+    console.error('[tolls]', err);
+    return json({ error: message(lang, 'unknownError') }, 500);
+  }
+}
+
 // GET /api/places?q=箱根&lat=35.6&lng=139.7&session=<uuid>
 export async function handlePlaces(request, env) {
   if (request.method !== 'GET') return json({ error: 'Method Not Allowed' }, 405);
@@ -88,6 +113,7 @@ export default {
     const url = new URL(request.url);
     if (url.pathname === '/api/route') return handleRoute(request, env);
     if (url.pathname === '/api/places') return handlePlaces(request, env);
+    if (url.pathname === '/api/tolls') return handleTolls(request, env);
     if (url.pathname === '/api/config') {
       return json({ provider: env.GOOGLE_MAPS_API_KEY ? 'google' : 'osm', maxStops: Number(env.MAX_STOPS) || 10 });
     }

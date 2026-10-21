@@ -37,6 +37,14 @@
           <label><input type="checkbox" name="avoidTolls"> <span data-i18n="avoidTolls">有料道路を使わない</span></label>
           <label><input type="checkbox" name="avoidHighways"> <span data-i18n="avoidHighways">高速道路を使わない</span></label>
           <p class="options-note" data-i18n="optionsNote">区間ごとに変えるときは、各目的地の「ここまでの道」で選んでください。</p>
+          <label class="toll-payment">
+            <span data-i18n="tollPayment">有料道路の料金</span>
+            <select name="tollPayment">
+              <option value="etc2" data-i18n="payEtc2">ETC2.0</option>
+              <option value="etc" data-i18n="payEtc">ETC</option>
+              <option value="cash" data-i18n="payCash">現金</option>
+            </select>
+          </label>
         </fieldset>
 
         <p class="hint" data-i18n-html="hint">
