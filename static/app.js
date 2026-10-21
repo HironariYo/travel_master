@@ -128,6 +128,7 @@ $('#add-stop').addEventListener('click', () => {
 $('#reset').addEventListener('click', () => {
   stopsEl.replaceChildren();
   form.avoidTolls.checked = false;
+  form.tollPayment.value = 'etc2';
   form.avoidHighways.checked = false;
   addStop({ departAt: defaultStart() });
   addStop();
@@ -152,6 +153,7 @@ function readForm() {
       avoidHighways: $('[name=legAvoidHighways]', li).checked,
       parking: $('[name=parking]', li).checked,
     })),
+    tollPayment: form.tollPayment.value,
   };
 }
 
@@ -161,6 +163,8 @@ function fillForm(plan) {
   const fallback = { avoidTolls: Boolean(plan.avoidTolls), avoidHighways: Boolean(plan.avoidHighways) };
   plan.stops.forEach((s) => addStop({ ...fallback, ...s }));
   while (stopsEl.children.length < 2) addStop();
+  // 料金の払い方。指定がなければ ETC2.0
+  form.tollPayment.value = ['etc2', 'etc', 'cash', 'none'].includes(plan.tollPayment) ? plan.tollPayment : 'etc2';
 }
 
 // 入力内容はこのブラウザにだけ保存する。共有は URL（#plan=...）で行う
@@ -552,9 +556,42 @@ function renderSummary(result) {
       <div><dt>${t('sumDistance')}</dt><dd>${formatDistance(sum.distanceMeters)}</dd></div>
       <div><dt>${t('sumStayWait')}</dt><dd>${formatDuration((sum.stayMinutes + sum.waitMinutes) * 60)}</dd></div>
       ${sum.walkMinutes ? `<div><dt>${t('sumWalk')}</dt><dd>${formatDuration(sum.walkMinutes * 60)}</dd></div>` : ''}
+      ${tollSummaryHtml(sum)}
     </dl>
-    <p class="conditions">${escapeHtml(t('conditionsLabel', { text: planConditionText(result.legs) }))}</p>`;
+    <p class="conditions">${escapeHtml(t('conditionsLabel', { text: planConditionText(result.legs) }))}</p>
+    ${tollNotesHtml(result)}`;
   el.hidden = false;
+}
+
+// ---------- 有料道路の料金 ----------
+
+const PAY_KEYS = { etc2: 'payEtc2', etc: 'payEtc', cash: 'payCash' };
+
+function formatYen(amount) {
+  return new Intl.NumberFormat(getLocale(), { style: 'currency', currency: 'JPY' }).format(amount);
+}
+
+// 区間の料金: 「1,250円（ETC2.0）」/「有料道路あり（料金不明）」。有料道路なし・計算しないときは空
+function tollText(toll, payment) {
+  if (!toll) return '';
+  if (toll.status === 'unknown') return t('tollUnknown');
+  if (toll.estimate) return t('tollCashEstimate', { price: formatYen(toll.amount) });
+  return t('tollPrice', { price: formatYen(toll.amount), payment: t(PAY_KEYS[payment] ?? 'payEtc2') });
+}
+
+function tollSummaryHtml(sum) {
+  if (!sum.tollPayment || sum.tollPayment === 'none') return '';
+  const total = formatYen(sum.tollYen);
+  const value = sum.tollUnknown ? t('tollTotalWithUnknown', { total }) : total;
+  return `<div><dt>${escapeHtml(t('sumToll', { payment: t(PAY_KEYS[sum.tollPayment]) }))}</dt><dd>${escapeHtml(value)}</dd></div>`;
+}
+
+// 料金の注記は区間ごとに繰り返さず、合計の下に一度だけ出す
+function tollNotesHtml(result) {
+  const notes = [];
+  if (result.legs.some((l) => l.toll?.estimate)) notes.push(t('tollCashNote'));
+  if (result.totals.tollUnknown) notes.push(t('tollUnknownNote'));
+  return notes.map((n) => `<p class="conditions">💴 ${escapeHtml(n)}</p>`).join('');
 }
 
 function conditionText(options = {}) {
@@ -612,7 +649,10 @@ function scheduleText(result) {
   const lines = [];
   result.stops.forEach((s, i) => {
     const leg = result.legs[i - 1];
-    if (leg) lines.push(t('textCar', { duration: formatDuration(leg.durationSeconds), distance: formatDistance(leg.distanceMeters) }));
+    if (leg) {
+      const toll = tollText(leg.toll, result.totals.tollPayment);
+      lines.push(t('textCar', { duration: formatDuration(leg.durationSeconds), distance: formatDistance(leg.distanceMeters) }) + (toll ? ` ${toll}` : ''));
+    }
     const head = stopName(i);
     const times = [
       s.arrival ? t('textArrive', { time: formatDateTime(s.arrival) }) : null,
@@ -715,6 +755,7 @@ function renderTimeline(result) {
       li.innerHTML = `
         <span class="tl-leg-line" aria-hidden="true"></span>
         <span class="tl-leg-text">🚗 ${formatDuration(leg.durationSeconds)}${t('sep')}${formatDistance(leg.distanceMeters)}${leg.trafficAware ? `<span class="tag">${t('tagTraffic')}</span>` : ''}${legConditionTags(leg.options)}</span>
+        ${leg.toll ? `<span class="tl-leg-toll">💴 ${escapeHtml(tollText(leg.toll, result.totals.tollPayment))}</span>` : ''}
         ${leg.unavoidable?.length ? `<span class="tl-leg-warn">${escapeHtml(t('unavoidable', { roads: leg.unavoidable.map((k) => t(k)).join(t('condJoin')) }))}</span>` : ''}
         <a href="${escapeHtml(googleMapsUrl(legStops))}" target="_blank" rel="noopener" class="tl-link">${t('legLink')}</a>`;
       el.append(li);

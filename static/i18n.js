@@ -11,6 +11,18 @@ export const LANGS = [
 const STORAGE_KEY = 'travel-master:lang';
 
 const ja = {
+  tollPayment: '有料道路の料金',
+  payEtc2: 'ETC2.0',
+  payEtc: 'ETC',
+  payCash: '現金（目安）',
+  payNone: '計算しない',
+  tollPrice: ({ price, payment }) => `${price}（${payment}）`,
+  tollCashEstimate: ({ price }) => `${price}（現金・目安）`,
+  tollCashNote: '現金の料金は Google から取得できないため、ETC の料金を目安として表示しています。首都高などは現金のほうが高いことがあります。',
+  tollUnknownNote: '「料金不明」の区間は、Google に料金のデータがない有料道路を通ります（首都高だけの区間や圏央道など）。',
+  tollUnknown: '有料道路あり（料金不明）',
+  sumToll: ({ payment }) => `有料道路・${payment}`,
+  tollTotalWithUnknown: ({ total }) => `${total}＋不明あり`,
   offDayDetail: ({ kind, days, hours, limit }) =>
     `${kind}・今日は${days}のためメーター対象外（料金・時間制限なし。ふだんは${hours}・最大${limit}分）`,
   offDayNewYear: '1月1日〜3日',
@@ -132,6 +144,18 @@ const ja = {
 };
 
 const en = {
+  tollPayment: 'Toll fees',
+  payEtc2: 'ETC 2.0',
+  payEtc: 'ETC',
+  payCash: 'Cash (estimate)',
+  payNone: "Don't calculate",
+  tollPrice: ({ price, payment }) => `${price} (${payment})`,
+  tollCashEstimate: ({ price }) => `${price} (cash, estimate)`,
+  tollCashNote: "Google doesn't provide cash fares, so the ETC fare is shown as an estimate. Cash can be higher on roads such as the Shuto Expressway.",
+  tollUnknownNote: 'Legs marked "fee unknown" use toll roads Google has no fare data for (e.g. Shuto Expressway only, Ken-O Expressway).',
+  tollUnknown: 'Toll road (fee unknown)',
+  sumToll: ({ payment }) => `Tolls · ${payment}`,
+  tollTotalWithUnknown: ({ total }) => `${total} + unknown`,
   offDayDetail: ({ kind, days, hours, limit }) =>
     `${kind} · meters are off today (${days}): no fee and no time limit (normally ${hours}, max ${limit} min)`,
   offDayNewYear: 'Jan 1–3',
@@ -253,6 +277,18 @@ const en = {
 };
 
 const ko = {
+  tollPayment: '유료도로 요금',
+  payEtc2: 'ETC2.0',
+  payEtc: 'ETC',
+  payCash: '현금 (추정)',
+  payNone: '계산 안 함',
+  tollPrice: ({ price, payment }) => `${price} (${payment})`,
+  tollCashEstimate: ({ price }) => `${price} (현금 · 추정)`,
+  tollCashNote: '현금 요금은 Google에서 받을 수 없어 ETC 요금을 추정치로 표시합니다. 수도고속도로 등은 현금이 더 비쌀 수 있습니다.',
+  tollUnknownNote: '「요금 미상」 구간은 Google에 요금 데이터가 없는 유료도로를 지납니다 (수도고속도로만 지나는 구간, 켄오도 등).',
+  tollUnknown: '유료도로 있음 (요금 미상)',
+  sumToll: ({ payment }) => `유료도로 · ${payment}`,
+  tollTotalWithUnknown: ({ total }) => `${total} + 미상 있음`,
   offDayDetail: ({ kind, days, hours, limit }) =>
     `${kind} · 오늘은 ${days}이라 미터 대상 외 (요금·시간 제한 없음. 평소에는 ${hours} · 최대 ${limit}분)`,
   offDayNewYear: '1월 1일~3일',

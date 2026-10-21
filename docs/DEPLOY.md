@@ -11,12 +11,14 @@ MobileOrderInfra（`order`）と同じ Cloudflare アカウントに、別の Wo
 | 画面（HTML・CSS・JS） | Workers Static Assets | 無制限 |
 | ルート検索 | Google Routes API（任意） | Essentials（Compute Routes）は月 10,000 回まで無料。渋滞予測（TRAFFIC_AWARE）は Pro 扱いで月 5,000 回まで無料 |
 | 場所の候補 | Google Places API (New) Autocomplete（任意） | 月 10,000 回まで無料 |
+| 有料道路の料金 | Google Routes API の料金計算（任意） | 料金を計算するルート検索は **Compute Routes Enterprise** 扱いで、月 **1,000 回**まで無料、超えると 1,000 回あたり $15 |
 | 地図のタイル | OpenStreetMap | 無料（利用規約あり。アクセスが多くなったら有料のタイル配信に切り替える） |
 
 DB（Neon・Hyperdrive）は今は使いません。旅程の保存やログインが必要になったら、MobileOrderInfra と同じ方法で追加します。
 
 場所の候補は、打つのが止まってから 0.25 秒後に 1 回問い合わせます（2 文字以上のとき）。1 地点あたり数回です。
-1 回の計算で、区間の数だけ Routes API を呼びます（目的地 3 か所なら 3 回）。Worker のサブリクエストの上限（無料プランで 50）に収まるよう、地点は `MAX_STOPS`（既定 10）までにしています。
+1 回の計算で、区間の数だけ Routes API を呼びます（目的地 3 か所なら 3 回）。
+有料道路の料金を計算する設定（既定の ETC2.0 など）では、その区間の検索が Enterprise 扱いになります（「有料道路を使わない」区間と「計算しない」設定では頼まないので Pro / Essentials のまま）。路上パーキングを選んだ目的地は検索が 2 回になるので、その分も数えられます。月 1,000 回を超えそうなら、画面の「有料道路の料金」を「計算しない」にして使うか、料金の計算をやめる設定を検討してください。Worker のサブリクエストの上限（無料プランで 50）に収まるよう、地点は `MAX_STOPS`（既定 10）までにしています。
 
 ## 1. Google の API キーを作る（任意・推奨）
 

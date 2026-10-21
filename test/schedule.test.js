@@ -119,6 +119,7 @@ test('Google Routes API: 未来の出発は渋滞予測つきで検索する', a
     start: { lat: 1, lng: 2 },
     end: { lat: 3, lng: 4 },
     trafficAware: true,
+    toll: null,
   });
 
   // 過去の出発時刻では departureTime を送らない（API がエラーにするため）
@@ -305,9 +306,9 @@ test('有料道路・高速道路の条件を区間ごとに指定できる', as
     return { durationSeconds: 60, distanceMeters: 1, polyline: '', start: null, end: null };
   });
   assert.deepEqual(seen, [
-    'A→B {"avoidTolls":true,"avoidHighways":true}',
-    'B→C {"avoidTolls":false,"avoidHighways":true}',
-    'C→D {"avoidTolls":false,"avoidHighways":true}',
+    'A→B {"avoidTolls":true,"avoidHighways":true,"tollPayment":"etc2"}',
+    'B→C {"avoidTolls":false,"avoidHighways":true,"tollPayment":"etc2"}',
+    'C→D {"avoidTolls":false,"avoidHighways":true,"tollPayment":"etc2"}',
   ]);
 
   const explicit = normalizePlan({
@@ -335,4 +336,49 @@ test('API: エラーは画面の言語（lang）で返す', async () => {
   assert.match((await (await post({ stops, lang: 'en' })).json()).error, /starting point and at least one destination/);
   assert.match((await (await post({ stops, lang: 'ko' })).json()).error, /출발지와 목적지/);
   assert.match((await (await post({ stops, lang: 'xx' })).json()).error, /出発地と目的地/, '知らない言語は日本語');
+});
+
+test('有料道路の料金: ETC2.0（既定）・ETC・現金で tollPasses を変え、区間ごとと合計を出す', async () => {
+  const sent = [];
+  const priced = (units) => ({ travelAdvisory: { tollInfo: { estimatedPrice: [{ currencyCode: 'JPY', units: String(units) }] } } });
+  const responses = [priced(1250), {}, { travelAdvisory: { tollInfo: {} } }];
+  let n = 0;
+  const fakeFetch = async (url, init) => {
+    sent.push(JSON.parse(init.body));
+    return Response.json({ routes: [{ duration: '600s', distanceMeters: 1000, polyline: { encodedPolyline: '' }, legs: [{}], ...responses[n++ % 3] }] });
+  };
+  const stops = [
+    { place: 'A', departAt: new Date(T0).toISOString() },
+    { place: 'B' },
+    { place: 'C', avoidTolls: true },
+    { place: 'D' },
+  ];
+  const r = await buildSchedule(normalizePlan({ stops }), googleRouter('KEY', fakeFetch));
+  assert.equal(sent[0].routeModifiers.tollPasses[0], 'JP_ETC2', '既定は ETC2.0');
+  assert.deepEqual(sent[0].extraComputations, ['TOLLS']);
+  assert.equal(sent[1].extraComputations, undefined, '有料道路を使わない区間は料金を頼まない（Enterprise の料金を避ける）');
+  assert.deepEqual(r.legs.map((l) => l.toll), [
+    { status: 'priced', amount: 1250, currency: 'JPY' },
+    null,
+    { status: 'unknown' },
+  ]);
+  assert.equal(r.totals.tollYen, 1250);
+  assert.equal(r.totals.tollUnknown, true);
+  assert.equal(r.totals.tollPayment, 'etc2');
+
+  sent.length = 0;
+  await buildSchedule(normalizePlan({ stops: stops.slice(0, 2), tollPayment: 'etc' }), googleRouter('KEY', fakeFetch));
+  assert.deepEqual(sent[0].routeModifiers.tollPasses, ['JP_ETC']);
+  sent.length = 0;
+  await buildSchedule(normalizePlan({ stops: stops.slice(0, 2), tollPayment: 'cash' }), googleRouter('KEY', fakeFetch));
+  assert.deepEqual(sent[0].routeModifiers.tollPasses, ['JP_ETC'], '現金は日本では返らないので ETC の料金を目安にする');
+  const cash = await buildSchedule(normalizePlan({ stops: stops.slice(0, 2), tollPayment: 'cash' }), googleRouter('KEY', async () =>
+    Response.json({ routes: [{ duration: '60s', legs: [{}], travelAdvisory: { tollInfo: { estimatedPrice: [{ currencyCode: 'JPY', units: '900' }] } } }] }),
+  ));
+  assert.deepEqual(cash.legs[0].toll, { status: 'priced', amount: 900, currency: 'JPY', estimate: true });
+  sent.length = 0;
+  const none = await buildSchedule(normalizePlan({ stops: stops.slice(0, 2), tollPayment: 'none' }), googleRouter('KEY', fakeFetch));
+  assert.equal(sent[0].extraComputations, undefined, '計算しない');
+  assert.equal(none.legs[0].toll, undefined);
+  assert.equal(normalizePlan({ stops: stops.slice(0, 2), tollPayment: 'bogus' }).tollPayment, 'etc2');
 });

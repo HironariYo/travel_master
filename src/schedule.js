@@ -2,6 +2,7 @@
 // 時刻はすべてエポックミリ秒で扱う。Worker は UTC で動くので、表示用の整形はブラウザ側で行う
 
 import { InputError } from './messages.js';
+import { TOLL_PAYMENTS } from './routing.js';
 
 export { InputError };
 
@@ -20,6 +21,7 @@ export function parseTime(value) {
 // placeId・lat/lng は候補から選んだときに付く。あればルート検索で place（文字）より優先する
 // avoidTolls・avoidHighways は「その地点まで」の区間の条件。地点にないときは全体の指定（body.avoidTolls など）を使う
 // parking: true の目的地は、近くの時間制限駐車区間（東京都内）まで車で行き、そこから歩く
+// tollPayment: 有料道路の料金の計算（'etc2' 既定 / 'etc' / 'cash' / 'none' = 計算しない）
 export function normalizePlan(body, { maxStops = 10 } = {}) {
   if (!body || !Array.isArray(body.stops)) throw new InputError('noStops');
   const stops = body.stops.map((s, i) => {
@@ -44,7 +46,8 @@ export function normalizePlan(body, { maxStops = 10 } = {}) {
   if (stops.length < 2) throw new InputError('needDestination');
   if (stops.length > maxStops) throw new InputError('tooManyStops', { max: maxStops });
   if (stops[0].departAt === null) throw new InputError('needDeparture');
-  return { stops };
+  const tollPayment = TOLL_PAYMENTS.includes(body.tollPayment) ? body.tollPayment : 'etc2';
+  return { stops, tollPayment };
 }
 
 // Google の Place ID。形式が違うものは無視して、文字で検索する
@@ -92,7 +95,9 @@ export async function buildSchedule(plan, routeLeg, { parking } = {}) {
   for (let i = 1; i < stops.length; i++) {
     // 区間ごとの条件（stops[i] まで）
     const options = { avoidTolls: stops[i].avoidTolls, avoidHighways: stops[i].avoidHighways };
-    let leg = await routeLeg(from, stops[i], departure, options);
+    const tollPayment = plan.tollPayment ?? 'none';
+    // 駐車区間が見つからなければこの結果をそのまま使うので、1 回目から料金も頼む
+    let leg = await routeLeg(from, stops[i], departure, { ...options, tollPayment });
     const destination = leg.end ?? stops[i].location;
     let parked = null;
     if (stops[i].parking && parking) {
@@ -102,7 +107,7 @@ export async function buildSchedule(plan, routeLeg, { parking } = {}) {
         parked = parking.find(destination, departure + leg.durationSeconds * 1000, stops[i].stayMinutes);
         if (parked.status === 'ok') {
           const spot = { place: `🅿 ${stops[i].place}`, placeId: null, location: parked.point };
-          leg = await routeLeg(from, spot, departure, options);
+          leg = await routeLeg(from, spot, departure, { ...options, tollPayment });
         }
       }
     }
@@ -118,6 +123,8 @@ export async function buildSchedule(plan, routeLeg, { parking } = {}) {
       polylinePrecision: leg.polylinePrecision ?? 5,
       trafficAware: Boolean(leg.trafficAware),
       options,
+      // 有料道路の料金。undefined = 計算していない、null = 有料道路なし
+      toll: leg.toll,
       // 「使わない」を指定したのに通らざるを得なかった道（OpenStreetMap のときだけ分かる）
       unavoidable: [
         options.avoidTolls && leg.hasToll ? 'toll' : null,
@@ -168,6 +175,10 @@ export async function buildSchedule(plan, routeLeg, { parking } = {}) {
       stayMinutes: result.reduce((a, s) => a + s.stayMinutes, 0),
       waitMinutes: result.reduce((a, s) => a + s.waitMinutes, 0),
       walkMinutes: result.reduce((a, s) => a + (s.walkMinutes ?? 0) * 2, 0),
+      // 有料道路の料金の合計（円）。料金が分からない区間があれば tollUnknown
+      tollPayment: plan.tollPayment ?? 'none',
+      tollYen: legs.reduce((a, l) => a + (l.toll?.status === 'priced' ? l.toll.amount : 0), 0),
+      tollUnknown: legs.some((l) => l.toll?.status === 'unknown'),
       start: first,
       end: last,
     },
