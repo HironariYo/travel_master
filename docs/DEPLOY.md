@@ -30,7 +30,10 @@ DB（Neon・Hyperdrive）は今は使いません。旅程の保存やログイ�
 4. **API とサービス → 認証情報 → 認証情報を作成 → API キー**
 5. 作ったキーの **API の制限** で **Routes API と Places API (New) だけ** を許可する
    - キーは Worker（サーバー側）からだけ使うので、「アプリケーションの制限」は「なし」でよい（ブラウザにキーは出ない）
-6. 使いすぎを防ぐ: **API とサービス → Routes API / Places API (New) → 割り当て** で 1 日あたりのリクエスト数の上限を下げておく（例: Routes 300、Places 1000）
+6. 使いすぎを防ぐ:
+   - **Google Maps Platform → 割り当て**（https://console.cloud.google.com/google/maps-apis/quotas ）で、1 分あたりの上限を下げておく（例: Compute Routes 30、Autocomplete 60）。Routes API と Places API (New) は 1 分あたりの上限しか設定できない（1 日あたりの上限はない）
+   - **お支払い → 予算とアラート** で月数百円の予算を作る（超えそうになるとメールが来る。課金は止まらない）
+   - アプリ側でも 1 人（IP アドレス）あたりの回数を制限している（下の「セキュリティ」）
 
 ## 2. 公開する
 
@@ -43,6 +46,15 @@ npm run deploy
 
 `https://travel.<サブドメイン>.workers.dev` を開き、出発地・目的地を入れて計算できることを確かめます。
 キーを登録した場合は、場所の候補が Google の施設名・住所になり、結果の右上に「Google Routes API」と表示され、未来の出発時刻なら区間に「渋滞予測」が付きます。
+
+## セキュリティ
+
+- **回数制限**（`wrangler.jsonc` の `ratelimits`、Cloudflare の Rate Limiting・無料）: IP アドレスごとに 1 分あたり、ルート計算 10 回・場所の候補 60 回・料金の計算 5 回まで。超えると 429 を返し、画面に「少し待ってから」と出る。値は `wrangler.jsonc` で変えられる
+- **画面のヘッダー**（`static/_headers`）: CSP（読み込めるのは自分のサイト・cdnjs・地図のタイルだけ、通信は自分の API だけ）、`X-Frame-Options: DENY`、`X-Content-Type-Options: nosniff`、`Referrer-Policy`、`Permissions-Policy`、HSTS。外部のファイルを足すときは CSP にも足す
+- **地図ライブラリの改ざん検知**（`static/index.html` の `integrity`）: cdnjs の Leaflet が書き換えられていたら読み込まない。版を上げるときはハッシュも cdnjs の公表値に変える
+- **API のヘッダー**（`src/worker.js` の `json()`）: `nosniff`・`no-store`・CSP。他のサイトからの呼び出しは 403
+- **Google のキー**: Worker の秘密の値（`wrangler secret put`）に入れ、ブラウザには出さない
+- **Node.js**: 本番は Cloudflare の実行環境（workerd）で動き、Node.js は使わない（Cloudflare が更新する）。手元の開発（`npm run dev`・テスト）は Node.js 24 以上（`.nvmrc`）。脆弱性の確認は `npm audit`、開発用ツールの更新は `npm install -D wrangler@latest`
 
 ## ログ
 
