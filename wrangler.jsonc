@@ -3,7 +3,7 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "travel",
   "main": "src/worker.js",
-  "compatibility_date": "2026-09-01",
+  "compatibility_date": "2026-10-20",
 
   // 画面（HTML・CSS・JS）は Worker を通さずに返す。/api/* だけ Worker が受け持つ
   "assets": {
@@ -11,6 +11,15 @@
     "binding": "ASSETS",
     "run_worker_first": ["/api/*"]
   },
+
+  // 1 人（IP アドレス）あたりの回数制限。連打や攻撃で Google の API の費用が膨らまないようにする（無料）
+  // period は 10 か 60（秒）。namespace_id はアカウント内で重ならない値（MobileOrderInfra は 1001）
+  // https://developers.cloudflare.com/workers/runtime-apis/bindings/rate-limit/
+  "ratelimits": [
+    { "name": "ROUTE_LIMITER", "namespace_id": "2001", "simple": { "limit": 10, "period": 60 } },
+    { "name": "PLACES_LIMITER", "namespace_id": "2002", "simple": { "limit": 60, "period": 60 } },
+    { "name": "TOLLS_LIMITER", "namespace_id": "2003", "simple": { "limit": 5, "period": 60 } }
+  ],
 
   // 公開してよい設定値。Google の API キーは `npx wrangler secret put GOOGLE_MAPS_API_KEY` で登録する
   // （未登録なら OpenStreetMap でルートを検索する。渋滞は考慮しない）

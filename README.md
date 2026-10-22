@@ -62,6 +62,8 @@ test/             単体テスト（node --test）
 
 ## 手元で動かす
 
+Node.js 24 以上が必要です（`.nvmrc`。nvm を使っているなら `nvm use`）。本番は Cloudflare の実行環境で動くので Node.js は使いません。
+
 ```bash
 npm install
 cp .dev.vars.example .dev.vars   # Google のキーを使うなら GOOGLE_MAPS_API_KEY を書く

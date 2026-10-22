@@ -1,0 +1,13 @@
+# 画面（Static Assets）に付けるセキュリティヘッダー
+# https://developers.cloudflare.com/workers/static-assets/headers/
+# - CSP: 読み込めるのは自分のサイトと cdnjs（地図ライブラリ）、地図のタイル（OpenStreetMap）だけ。通信は自分の API だけ
+#   外部のファイルを足すときはここにも足す
+# - API（/api/*）の応答のヘッダーは src/worker.js の json() で付ける
+/*
+  Content-Security-Policy: default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com; style-src 'self' https://cdnjs.cloudflare.com; img-src 'self' data: https://*.tile.openstreetmap.org https://cdnjs.cloudflare.com; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()
+  Cross-Origin-Opener-Policy: same-origin
+  Strict-Transport-Security: max-age=31536000; includeSubDomains

@@ -6,7 +6,7 @@
   "description": "車での移動ルートと旅程を計画する Web アプリ",
   "main": "src/worker.js",
   "engines": {
-    "node": ">=22"
+    "node": ">=24"
   },
   "scripts": {
     "dev": "wrangler dev",
@@ -15,6 +15,6 @@
     "test": "node --test test/*.test.js"
   },
   "devDependencies": {
-    "wrangler": "^4.145.0"
+    "wrangler": "^4.151.3"
   }
 }

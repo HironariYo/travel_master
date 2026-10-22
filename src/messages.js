@@ -26,6 +26,7 @@ const MESSAGES = {
     badJson: () => 'JSON の形式が正しくありません',
     unknownError: () => 'エラーが発生しました',
     tollsUnavailable: () => '有料道路の料金は Google のキーがあるときだけ計算できます',
+    tooManyRequests: () => '短い時間に何度も使われたため、少し待ってからもう一度お試しください',
   },
   en: {
     badTime: ({ value }) => `Invalid time format: ${value}`,
@@ -45,6 +46,7 @@ const MESSAGES = {
     badJson: () => 'Invalid JSON',
     unknownError: () => 'Something went wrong',
     tollsUnavailable: () => 'Toll fees can only be calculated when a Google API key is set',
+    tooManyRequests: () => 'Too many requests in a short time. Please wait a moment and try again',
   },
   ko: {
     badTime: ({ value }) => `시각 형식이 올바르지 않습니다: ${value}`,
@@ -64,6 +66,7 @@ const MESSAGES = {
     badJson: () => 'JSON 형식이 올바르지 않습니다',
     unknownError: () => '오류가 발생했습니다',
     tollsUnavailable: () => '유료도로 요금은 Google 키가 있을 때만 계산할 수 있습니다',
+    tooManyRequests: () => '짧은 시간에 너무 많이 사용했습니다. 잠시 후 다시 시도해 주세요',
   },
 };
 

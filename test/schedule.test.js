@@ -397,3 +397,23 @@ test('API: /api/tolls は Google のキーがないと使えない', async () =>
   assert.equal(res.status, 400);
   assert.match((await res.json()).error, /Google API key/);
 });
+
+test('API: 1 人あたりの回数制限を超えたら 429（言語に合わせたメッセージ）', async () => {
+  const keys = [];
+  const limiter = (ok) => ({ limit: async ({ key }) => (keys.push(key), { success: ok }) });
+  const env = { ROUTE_LIMITER: limiter(false), PLACES_LIMITER: limiter(false), TOLLS_LIMITER: limiter(false), GOOGLE_MAPS_API_KEY: 'KEY' };
+  const headers = { 'CF-Connecting-IP': '203.0.113.7' };
+  const route = await worker.fetch(
+    new Request('https://travel.example/api/route', { method: 'POST', headers, body: JSON.stringify({ stops: [], lang: 'en' }) }),
+    env,
+  );
+  assert.equal(route.status, 429);
+  assert.equal(route.headers.get('Retry-After'), '60');
+  assert.match((await route.json()).error, /Too many requests/);
+  const places = await worker.fetch(new Request('https://travel.example/api/places?q=箱根', { headers }), env);
+  assert.equal(places.status, 429);
+  const tolls = await worker.fetch(new Request('https://travel.example/api/tolls', { method: 'POST', headers, body: '{}' }), env);
+  assert.equal(tolls.status, 429);
+  assert.deepEqual(keys, ['203.0.113.7', '203.0.113.7', '203.0.113.7'], 'IP アドレスごとに数える');
+  assert.equal(route.headers.get('X-Content-Type-Options'), 'nosniff');
+});

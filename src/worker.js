@@ -8,11 +8,17 @@ import { googleRouter, osmRouter, RoutingError } from './routing.js';
 import { buildSchedule, InputError, normalizePlan } from './schedule.js';
 import { computeTolls, normalizeTollRequest } from './tolls.js';
 
-function json(data, status = 200) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' },
-  });
+// API の応答。画面のヘッダーは static/_headers
+const API_HEADERS = {
+  'Content-Type': 'application/json; charset=utf-8',
+  'Cache-Control': 'no-store',
+  'X-Content-Type-Options': 'nosniff',
+  'Referrer-Policy': 'no-referrer',
+  'Content-Security-Policy': "default-src 'none'; frame-ancestors 'none'",
+};
+
+function json(data, status = 200, headers = {}) {
+  return new Response(JSON.stringify(data), { status, headers: { ...API_HEADERS, ...headers } });
 }
 
 // 他のサイトから API キーを使われないよう、同じオリジンからの呼び出しだけを受ける
@@ -22,6 +28,15 @@ function isCrossSite(request) {
   if (origin && new URL(origin).host !== new URL(request.url).host) return true;
   const site = request.headers.get('Sec-Fetch-Site');
   return Boolean(site) && site !== 'same-origin' && site !== 'none';
+}
+
+// 1 人（IP アドレス）あたりの回数制限（wrangler.jsonc の ratelimits）。超えたら 429 を返す
+// 設定がない環境（単体テストなど）では制限しない
+async function rateLimited(limiter, request, lang) {
+  if (!limiter) return null;
+  const key = request.headers.get('CF-Connecting-IP') ?? 'unknown';
+  const { success } = await limiter.limit({ key });
+  return success ? null : json({ error: message(lang, 'tooManyRequests') }, 429, { 'Retry-After': '60' });
 }
 
 export async function handleRoute(request, env) {
@@ -35,6 +50,8 @@ export async function handleRoute(request, env) {
     return json({ error: message('ja', 'badJson') }, 400);
   }
   const lang = normalizeLang(body?.lang);
+  const limited = await rateLimited(env.ROUTE_LIMITER, request, lang);
+  if (limited) return limited;
 
   try {
     const plan = normalizePlan(body, { maxStops: Number(env.MAX_STOPS) || 10 });
@@ -70,6 +87,8 @@ export async function handleTolls(request, env) {
   }
   const lang = normalizeLang(body?.lang);
   if (!env.GOOGLE_MAPS_API_KEY) return json({ error: message(lang, 'tollsUnavailable') }, 400);
+  const limited = await rateLimited(env.TOLLS_LIMITER, request, lang);
+  if (limited) return limited;
   try {
     const req = normalizeTollRequest(body, { maxLegs: (Number(env.MAX_STOPS) || 10) - 1 });
     return json(await computeTolls(req, googleRouter(env.GOOGLE_MAPS_API_KEY, fetch, { lang })));
@@ -90,6 +109,8 @@ export async function handlePlaces(request, env) {
   const lang = normalizeLang(params.get('lang'));
   const q = (params.get('q') ?? '').trim().slice(0, 100);
   if (q.length < 2) return json({ suggestions: [] });
+  const limited = await rateLimited(env.PLACES_LIMITER, request, lang);
+  if (limited) return limited;
   const lat = Number(params.get('lat'));
   const lng = Number(params.get('lng'));
   const near =
