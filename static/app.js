@@ -183,25 +183,62 @@ function save() {
   }
 }
 
-function encodePlan(plan) {
-  const bytes = new TextEncoder().encode(JSON.stringify(plan));
-  return btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+// ---------- 共有リンク ----------
+// 計画は URL の # 以降に入れる（# 以降はサーバーに送られないので、行き先がサーバーに残らない）
+//   #p=...    圧縮した形式（deflate-raw + base64url）。今はこちらを作る
+//   #plan=... 以前の形式（JSON の base64url）。以前に共有したリンクも開けるように読み込みだけ残す
+
+const toBase64Url = (bytes) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const fromBase64Url = (text) => Uint8Array.from(atob(text.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
+
+async function pipeBytes(bytes, stream) {
+  return new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(stream)).arrayBuffer());
 }
 
-function decodePlan(text) {
-  const b64 = text.replace(/-/g, '+').replace(/_/g, '/');
-  const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
-  return JSON.parse(new TextDecoder().decode(bytes));
+async function shareUrl(plan) {
+  const json = new TextEncoder().encode(JSON.stringify(plan));
+  const base = `${location.origin}${location.pathname}`;
+  // 圧縮できないブラウザ（とても古いもの）は以前の形式
+  if (typeof CompressionStream === 'undefined') return `${base}#plan=${toBase64Url(json)}`;
+  return `${base}#p=${toBase64Url(await pipeBytes(json, new CompressionStream('deflate-raw')))}`;
 }
 
-function loadInitialPlan() {
-  const m = /[#&]plan=([^&]+)/.exec(location.hash);
-  if (m) {
+async function planFromHash(hash) {
+  const short = /[#&]p=([^&]+)/.exec(hash);
+  if (short) {
+    const bytes = await pipeBytes(fromBase64Url(short[1]), new DecompressionStream('deflate-raw'));
+    return JSON.parse(new TextDecoder().decode(bytes));
+  }
+  const old = /[#&]plan=([^&]+)/.exec(hash);
+  if (old) return JSON.parse(new TextDecoder().decode(fromBase64Url(old[1])));
+  return null;
+}
+
+// 「🔗 共有」: スマホは共有メニュー（LINE・メールなど）、パソコンはリンクをコピー
+async function sharePlan(btn) {
+  const plan = readForm();
+  if (!plan.stops.some((s, i) => i > 0 && s.place) || !plan.stops[0].place) return showError(t('shareNeedPlace'));
+  showError('');
+  const url = await shareUrl(plan);
+  const mobile = window.matchMedia('(pointer: coarse)').matches;
+  if (mobile && navigator.share) {
     try {
-      return { plan: decodePlan(m[1]), fromUrl: true };
-    } catch {
-      /* 壊れた URL は無視する */
+      await navigator.share({ title: t('title'), text: t('shareText'), url });
+      return;
+    } catch (err) {
+      // 共有メニューを閉じただけならコピーもしない
+      if (err.name === 'AbortError') return;
     }
+  }
+  await copy(url, btn, t('linkCopied'));
+}
+
+async function loadInitialPlan() {
+  try {
+    const shared = await planFromHash(location.hash);
+    if (shared?.stops?.length) return { plan: shared, fromUrl: true };
+  } catch {
+    /* 壊れた URL は無視する */
   }
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null');
@@ -680,10 +717,10 @@ function renderLinks(result) {
   const el = $('#links');
   el.innerHTML = `
     <a class="btn btn-primary" href="${escapeHtml(googleMapsUrl(result.stops))}" target="_blank" rel="noopener">${t('openAll')}</a>
-    <button type="button" class="btn btn-ghost" id="share">${t('share')}</button>
+    <button type="button" class="btn btn-ghost" id="share">🔗 ${t('share')}</button>
     <button type="button" class="btn btn-ghost" id="copy-text">${t('copyText')}</button>`;
   el.hidden = false;
-  $('#share').addEventListener('click', () => copy(`${location.origin}${location.pathname}#plan=${encodePlan(readForm())}`, '#share'));
+  $('#share').addEventListener('click', (e) => sharePlan(e.currentTarget));
   $('#copy-text').addEventListener('click', () => copy(scheduleText(result), '#copy-text'));
   // 駐車区間のデータは CC BY 4.0。使ったときは出典を出す
   const src = $('#source');
@@ -695,12 +732,12 @@ function renderLinks(result) {
   }
 }
 
-async function copy(text, sel) {
-  const btn = $(sel);
+async function copy(text, target, doneLabel = t('copied')) {
+  const btn = typeof target === 'string' ? $(target) : target;
   const label = btn.textContent;
   try {
     await navigator.clipboard.writeText(text);
-    btn.textContent = t('copied');
+    btn.textContent = doneLabel;
   } catch {
     window.prompt(t('copyPrompt'), text);
   }
@@ -954,7 +991,8 @@ langSelect.addEventListener('change', () => {
 // ---------- 起動 ----------
 
 applyStatic();
-const initial = loadInitialPlan();
+$('#share-plan').addEventListener('click', (e) => sharePlan(e.currentTarget));
+const initial = await loadInitialPlan();
 fillForm(initial.plan);
 fetch('/api/config')
   .then((r) => r.json())
